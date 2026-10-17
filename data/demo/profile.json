@@ -1,0 +1,81 @@
+{
+  "summary": "Final-year B.Tech (CSE) student interested in data science and applied generative AI.",
+  "skills": [
+    "python",
+    "sql",
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "matplotlib",
+    "git",
+    "power bi",
+    "streamlit",
+    "machine learning",
+    "data analysis",
+    "prompt engineering"
+  ],
+  "experience": [],
+  "projects": [
+    {
+      "name": "Flight Fare Prediction",
+      "tech_stack": [
+        "python",
+        "pandas",
+        "scikit-learn",
+        "streamlit"
+      ],
+      "bullets": [
+        "Built a regression model on 10,000+ flight records and reduced RMSE by 18% after feature engineering and hyperparameter tuning",
+        "Deployed the model as a Streamlit web app so users can estimate fares from route and date"
+      ]
+    },
+    {
+      "name": "Spam E-Mail Detection",
+      "tech_stack": [
+        "python",
+        "scikit-learn",
+        "nltk"
+      ],
+      "bullets": [
+        "Trained a Naive Bayes classifier with TF-IDF features that reached 97% accuracy on a held-out test set",
+        "Cleaned and tokenized 5,000 emails using NLTK"
+      ]
+    },
+    {
+      "name": "Virat Kohli Performance Analysis",
+      "tech_stack": [
+        "power bi",
+        "sql"
+      ],
+      "bullets": [
+        "Designed an interactive Power BI dashboard analysing batting performance across formats and seasons",
+        "Wrote SQL queries to prepare match-level data for reporting"
+      ]
+    },
+    {
+      "name": "Medical Assistant using Gemini Pro",
+      "tech_stack": [
+        "python",
+        "google gemini",
+        "streamlit"
+      ],
+      "bullets": [
+        "Built a Gemini-powered assistant that answers health questions with safety disclaimers",
+        "Added prompt templates to keep answers short and structured"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Example Institute of Technology",
+      "degree": "B.Tech in Computer Science and Engineering",
+      "duration": "2022-2026",
+      "details": [
+        "CGPA: 8.4/10"
+      ]
+    }
+  ],
+  "certifications": [
+    "Python for Data Science - Example Online Academy"
+  ]
+}

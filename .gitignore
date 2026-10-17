@@ -1,0 +1,20 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Your real resume has personal data: never commit it
+data/resume/*
+!data/resume/.gitkeep
+
+# Used in later parts
+chroma_db/
+*.db
+
+
+# Per-session indexes (contain resume-derived text)
+data/sessions/
+
+.streamlit/secrets.toml
+data/demo/

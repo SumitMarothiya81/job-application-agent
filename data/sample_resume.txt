@@ -1,0 +1,36 @@
+Riya Verma
+riya.verma@example.com | +91 98765 43210 | linkedin.com/in/riya-verma-demo | github.com/riya-demo
+Jodhpur, Rajasthan
+
+SUMMARY
+Final-year B.Tech (CSE) student interested in data science and applied generative AI.
+
+SKILLS
+Languages: Python, SQL
+Libraries: pandas, NumPy, scikit-learn, Matplotlib
+Tools: Git, Power BI, Streamlit
+Concepts: Machine Learning, Data Analysis, Prompt Engineering
+
+PROJECTS
+Flight Fare Prediction (Python, pandas, scikit-learn, Streamlit)
+- Built a regression model on 10,000+ flight records and reduced RMSE by 18% after feature engineering and hyperparameter tuning
+- Deployed the model as a Streamlit web app so users can estimate fares from route and date
+
+Spam E-Mail Detection (Python, scikit-learn, NLTK)
+- Trained a Naive Bayes classifier with TF-IDF features that reached 97% accuracy on a held-out test set
+- Cleaned and tokenized 5,000 emails using NLTK
+
+Virat Kohli Performance Analysis (Power BI, SQL)
+- Designed an interactive Power BI dashboard analysing batting performance across formats and seasons
+- Wrote SQL queries to prepare match-level data for reporting
+
+Medical Assistant using Gemini Pro (Python, Google Gemini, Streamlit)
+- Built a Gemini-powered assistant that answers health questions with safety disclaimers
+- Added prompt templates to keep answers short and structured
+
+EDUCATION
+B.Tech in Computer Science and Engineering, Example Institute of Technology, 2022-2026
+CGPA: 8.4/10
+
+CERTIFICATIONS
+Python for Data Science - Example Online Academy

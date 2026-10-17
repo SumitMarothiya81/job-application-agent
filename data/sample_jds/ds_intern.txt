@@ -1,0 +1,22 @@
+Data Science Intern - Acme Analytics, Bengaluru (Hybrid)
+
+About the role
+We are looking for a Data Science Intern to join our GenAI team for 6 months.
+
+What you will do
+- Build and evaluate LLM-powered features such as document Q&A
+- Clean and analyse datasets using Python and SQL
+- Create dashboards to present insights to stakeholders
+- Write unit tests and document your work
+
+Requirements
+- Pursuing or completed a degree in CS, Statistics or related field
+- Strong Python and SQL skills
+- Hands-on experience with pandas and scikit-learn
+- Understanding of machine learning fundamentals
+
+Nice to have
+- Experience with LangChain or LangGraph
+- Knowledge of vector databases (FAISS, Chroma)
+- Familiarity with Docker and Git
+- Power BI or Tableau

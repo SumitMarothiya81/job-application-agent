@@ -30,6 +30,10 @@ from job_agent.matching import SkillStatus, match_resume_to_jd  # noqa: E402
 from job_agent.resume_index import build_resume_index, load_profile, load_store  # noqa: E402
 from job_agent.resume_loader import ResumeLoadError  # noqa: E402
 from job_agent.session import delete_session, new_session_id  # noqa: E402
+from job_agent.tracker_db import TrackerError, TrackerRepo, get_engine  # noqa: E402
+from job_agent.tracker_logic import ApplicationInput, Status, today_local  # noqa: E402
+from job_agent.ui_tracker import first_error, flash, label, render_tracker  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 SAMPLE_JD = """Data Science Intern - Acme Analytics, Bengaluru (Hybrid)
 
@@ -66,6 +70,11 @@ def get_demo():
 
 
 @st.cache_resource
+def get_repo() -> TrackerRepo:
+    return TrackerRepo(get_engine())
+
+
+@st.cache_resource
 def get_limiter() -> UsageLimiter:
     return UsageLimiter(
         per_session=int(os.getenv("DEMO_SESSION_LIMIT", "5")),
@@ -96,6 +105,7 @@ mode = st.sidebar.radio(
 byo = mode == "My own Gemini key"
 user_key = None
 remaining_slot = None
+
 if byo:
     user_key = st.sidebar.text_input("Gemini API key", type="password", key="user_key",
                                      help="Kept in this browser session only; never stored.")
@@ -121,7 +131,7 @@ if byo:
         "a paid key does not."
     )
 else:
-    remaining_slot = st.sidebar.empty()
+    remaining_slot = st.sidebar.empty()  # filled again after the analysis, so it never shows a stale number
 
 # ---------------------------------------------------------------- resume source
 my_sid = st.session_state.get("my_session_id") if byo else None
@@ -132,79 +142,124 @@ else:
     profile, store = get_demo()
     source_note = "Using the **fictional sample resume** (Riya Verma, final-year B.Tech)."
 
-# --------------------------------------------------------------------- main page
-st.title("Does this job fit your resume?")
-st.caption(source_note + " Paste any job description below.")
+# --------------------------------------------------------------------- tabs
+visitor = st.session_state["visitor_id"]
+today = today_local()
+repo = get_repo()
 
-st.button("Load sample job description", key="sample_btn",
-          on_click=lambda: st.session_state.update(jd_text=SAMPLE_JD))
-st.text_area("Job description", key="jd_text", height=280)
-want_advice = st.checkbox("Also suggest how to close my skill gaps (one extra Gemini call)", key="advice_box")
+due_count = len(repo.due_reminders(visitor, today))
+if due_count:
+    st.warning(f"⏰ {due_count} application follow-up(s) due. Open the Tracker tab.")
 
-if st.button("Analyze match", type="primary", key="analyze_btn"):
-    jd_text = st.session_state.get("jd_text", "")
-    if len(jd_text.strip()) < 40:
-        st.warning("Please paste a longer job description.")
-    elif byo and not user_key:
-        st.warning("Enter your Gemini API key in the sidebar first.")
-    else:
-        allowed, message = (True, "")
-        if not byo:
-            allowed, message = get_limiter().try_consume(
-                st.session_state["visitor_id"], units=2 if want_advice else 1)
-        if not allowed:
-            st.warning(message)
+tab_match, tab_tracker = st.tabs(["🔍 Match a job", "📋 Tracker"])
+
+with tab_match:
+
+    st.title("Does this job fit your resume?")
+    st.caption(source_note + " Paste any job description below.")
+
+    st.button("Load sample job description", key="sample_btn",
+              on_click=lambda: st.session_state.update(jd_text=SAMPLE_JD))
+    st.text_area("Job description", key="jd_text", height=280)
+    want_advice = st.checkbox("Also suggest how to close my skill gaps (one extra Gemini call)", key="advice_box")
+
+    if st.button("Analyze match", type="primary", key="analyze_btn"):
+        jd_text = st.session_state.get("jd_text", "")
+        if len(jd_text.strip()) < 40:
+            st.warning("Please paste a longer job description.")
+        elif byo and not user_key:
+            st.warning("Enter your Gemini API key in the sidebar first.")
         else:
-            try:
-                with st.spinner("Analyzing..."), use_api_key(user_key if byo else None):
-                    jd = parse_jd(jd_text)
-                    report = match_resume_to_jd(profile, store, jd)
-                    plan = advise_gaps(report, jd, profile.known_skills()) if want_advice else None
-                st.session_state["result"] = (report, plan)
-            except Exception as exc:  # noqa: BLE001
-                st.error(friendly_error(exc))
-if remaining_slot is not None:
-    remaining_slot.caption(
-        f"Demo runs left this session: {get_limiter().remaining(st.session_state['visitor_id'])}"
-    )
-result = st.session_state.get("result")
-if result:
-    report, plan = result
-    st.subheader(f"{report.job_title} @ {report.company or 'unknown company'}")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Match score", f"{report.overall_score}/100")
-    c2.metric("Required skills covered",
-              "n/a" if report.required_coverage is None else f"{report.required_coverage:.0%}")
-    c3.metric("Preferred skills covered",
-              "n/a" if report.preferred_coverage is None else f"{report.preferred_coverage:.0%}")
-    st.write(f"Verdict: **{report.verdict}**")
-    for note in report.fit_notes:
-        st.warning(note)
+            allowed, message = (True, "")
+            if not byo:
+                allowed, message = get_limiter().try_consume(
+                    st.session_state["visitor_id"], units=2 if want_advice else 1)
+            if not allowed:
+                st.warning(message)
+            else:
+                try:
+                    with st.spinner("Analyzing..."), use_api_key(user_key if byo else None):
+                        jd = parse_jd(jd_text)
+                        report = match_resume_to_jd(profile, store, jd)
+                        plan = advise_gaps(report, jd, profile.known_skills()) if want_advice else None
+                    st.session_state["result"] = (report, plan, jd_text)
+                    st.session_state["result_id"] = st.session_state.get("result_id", 0) + 1
+                except Exception as exc:  # noqa: BLE001
+                    st.error(friendly_error(exc))
 
-    st.markdown("#### Skills")
-    st.dataframe(
-        [{"Skill": m.skill, "Type": m.kind, "Status": STATUS_LABEL[m.status],
-          "Via": m.related_via or ("similar bullet" if m.status == SkillStatus.RELATED else "")} for m in report.matches],
-        use_container_width=True, hide_index=True,
-    )
-    with st.expander("Evidence from your resume"):
-        for m in report.matches:
-            if m.evidence:
-                st.markdown(f"**{m.skill}**")
-                for ev in m.evidence[:2]:
-                   st.write(f"- _{ev.source}_: {ev.text} (similarity {ev.score:.2f})")
+    if remaining_slot is not None:
+        remaining_slot.caption(
+            f"Demo runs left this session: {get_limiter().remaining(st.session_state['visitor_id'])}"
+        )
 
-    st.markdown("#### ATS keywords")
-    k1, k2 = st.columns(2)
-    k1.write("**Already on your resume:** " + (", ".join(report.ats_hits) or "-"))
-    k2.write("**Not on your resume:** " + (", ".join(report.ats_missing) or "-"))
+    result = st.session_state.get("result")
+    if result and len(result) == 3:  # (older sessions stored 2 values)
+        report, plan, jd_text = result
+        st.subheader(f"{report.job_title} @ {report.company or 'unknown company'}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Match score", f"{report.overall_score}/100")
+        c2.metric("Required skills covered",
+                  "n/a" if report.required_coverage is None else f"{report.required_coverage:.0%}")
+        c3.metric("Preferred skills covered",
+                  "n/a" if report.preferred_coverage is None else f"{report.preferred_coverage:.0%}")
+        st.write(f"Verdict: **{report.verdict}**")
+        for note in report.fit_notes:
+            st.warning(note)
 
-    if plan and plan.items:
-        st.markdown("#### How to close the gaps")
-        for item in plan.items:
-            with st.expander(f"{item.skill} ({item.priority} priority)"):
-                st.write(f"**Learn:** {item.how_to_close}")
-                st.write(f"**Project idea:** {item.project_idea}")
+        st.markdown("#### Skills")
+        st.dataframe(
+            [{"Skill": m.skill, "Type": m.kind, "Status": STATUS_LABEL[m.status],
+              "Via": m.related_via or ("similar bullet" if m.status == SkillStatus.RELATED else "")} for m in report.matches],
+            width="stretch", hide_index=True,
+        )
+        with st.expander("Evidence from your resume"):
+            for m in report.matches:
+                if m.evidence:
+                    st.markdown(f"**{m.skill}**")
+                    for ev in m.evidence[:2]:
+                        st.write(f"- _{ev.source}_: {ev.text} (similarity {ev.score:.2f})")
 
-st.divider()
-st.caption("Matching is a guide, not a verdict. You stay in control of every application you send.")
+
+        with st.expander("📋 Save this job to my tracker"):
+            rid = st.session_state.get("result_id", 0)
+            default_label = "My uploaded resume" if my_sid else "Sample resume"
+            with st.form(f"save_form_{rid}"):
+                s1, s2 = st.columns(2)
+                sv_company = s1.text_input("Company", value=report.company or "", key=f"sv_company_{rid}")
+                sv_role = s2.text_input("Role", value=report.job_title, key=f"sv_role_{rid}")
+                sv_status = s1.selectbox("Status", [Status.SAVED, Status.APPLIED], format_func=label,
+                                         key=f"sv_status_{rid}")
+                sv_resume = s2.text_input("Resume version label", value=default_label, key=f"sv_resume_{rid}")
+                sv_url = st.text_input("Job posting URL (optional)", key=f"sv_url_{rid}")
+                sv_submit = st.form_submit_button("Save to my tracker", key=f"sv_btn_{rid}")
+            if sv_submit:
+                try:
+                    get_repo().add(st.session_state["visitor_id"], ApplicationInput(
+                        company=sv_company, role=sv_role, status=sv_status, source_url=sv_url,
+                        resume_version=sv_resume, match_score=report.overall_score, jd_text=jd_text),
+                        today_local())
+                except ValidationError as exc:
+                    st.error(first_error(exc))
+                except TrackerError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Saved. Open the Tracker tab to manage it.")
+
+        st.markdown("#### ATS keywords")
+        k1, k2 = st.columns(2)
+        k1.write("**Already on your resume:** " + (", ".join(report.ats_hits) or "-"))
+        k2.write("**Not on your resume:** " + (", ".join(report.ats_missing) or "-"))
+
+        if plan and plan.items:
+            st.markdown("#### How to close the gaps")
+            for item in plan.items:
+                with st.expander(f"{item.skill} ({item.priority} priority)"):
+                    st.write(f"**Learn:** {item.how_to_close}")
+                    st.write(f"**Project idea:** {item.project_idea}")
+
+    st.divider()
+    st.caption("Matching is a guide, not a verdict. You stay in control of every application you send.")
+
+# Drawn last on purpose: anything saved on the Match tab in this run shows up here immediately.
+with tab_tracker:
+    render_tracker(repo, visitor, today)

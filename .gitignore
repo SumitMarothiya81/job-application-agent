@@ -17,4 +17,4 @@ chroma_db/
 data/sessions/
 
 .streamlit/secrets.toml
-data/demo/
+

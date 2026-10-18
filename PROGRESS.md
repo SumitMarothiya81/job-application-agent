@@ -12,8 +12,8 @@ Gemini; deploy early (after Part 3) on Streamlit Community Cloud / Render; demo 
 2. [x] Resume ingestion + RAG: loader (PDF/DOCX/TXT), PII redaction, structured parse, bullet chunks,
        local embeddings, per-session vector store, retrieval
 3a. [x] Match scoring (explicit / related / missing), ATS keyword coverage, fit notes, gap advice (CLI)
-3b. [ ] Mini Streamlit page + first deploy (Streamlit Community Cloud / Render)
-4. [ ] Database + application tracker + reminders
+3b. [x] Streamlit app (demo + own-key modes, usage caps) built and tested headlessly; [ ] deployed to Streamlit Community Cloud
+4. [x] Application tracker: SQLAlchemy DB (SQLite, Postgres-ready), statuses + history, follow-up reminders (in-app banner + .ics calendar export), stats incl. response rate per resume version, JSON export/import, Tracker tab; deployed with the Streamlit app
 5. [ ] Job discovery (Adzuna, manual import, dedupe, ranking)
 6. [ ] Smart assistant (LangGraph: tailor, verifier, email, human approval)
 7. [ ] Full UI (Streamlit/FastAPI) + PDF export
@@ -31,9 +31,21 @@ Gemini; deploy early (after Part 3) on Streamlit Community Cloud / Render; demo 
   taxonomy, then semantic score >= RELATED_THRESHOLD (default 0.68, env-tunable). Calibrate on real data.
 - Score = 100 * (0.7 * required_coverage + 0.3 * preferred_coverage); explicit=1, related=0.5, missing=0.
 
+- Streamlit Community Cloud (checked Oct 2026 docs): memory 690MB min / 2.7GB max, apps sleep after 12h without
+  traffic, GitHub required, secrets via app settings. fastembed+onnxruntime memory use must be verified on deploy.
+- Bring-your-own-key: llm.use_api_key(key) context manager (ContextVar); keys are never stored on disk.
+- Demo mode caps: DEMO_SESSION_LIMIT (default 5) and DEMO_DAILY_LIMIT (default 100), in-memory (reset on restart).
+
+- Tracker: every repo method takes user_id (visitor id) and filters on it. Free hosting has ephemeral disk, so the demo
+  tracker is temporary; users keep data via Export/Import. For durable data set DATABASE_URL to a hosted Postgres.
+- Reminders are shown in the app and exported as .ics; email/Telegram push needs a scheduler + stored contacts (not on free hosting).
+- Dates use TRACKER_TIMEZONE (default Asia/Kolkata); tzdata is in requirements for Windows.
+- Gap-advice idea for Part 6: group related gaps (FAISS/Chroma/vector databases) so one advice item covers a family.
+
 ## Current file list
 job_agent/{config,llm,schemas,prompts,jd_parser,session,resume_loader,privacy,resume_schema,
-           chunking,embeddings,vector_store,resume_parser,resume_index,matching,gap_advice}.py
+           chunking,embeddings,vector_store,resume_parser,resume_index,matching,gap_advice,limits,demo,tracker_logic,tracker_db,ui_tracker}.py
+app.py (Streamlit), data/demo/profile.json, .streamlit/secrets.toml.example
 scripts/{part1_demo,part2_demo,part3_demo,list_models,probe_models}.py
-tests/{test_jd_parser,test_llm_fallback,test_resume_pipeline,test_matching}.py
+tests/{test_jd_parser,test_llm_fallback,test_resume_pipeline,test_matching,test_limits_and_keys,test_demo,test_app,test_tracker_logic,test_tracker_db}.py
 data/sample_resume.txt, data/sample_jds/ds_intern.txt

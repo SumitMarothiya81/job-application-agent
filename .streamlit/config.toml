@@ -1,0 +1,3 @@
+[server]
+# Limit uploads to 5 MB
+maxUploadSize = 5

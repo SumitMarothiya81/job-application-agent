@@ -14,7 +14,9 @@ import streamlit as st
 st.set_page_config(page_title="Job Application Agent", page_icon="🎯", layout="wide")
 
 # Streamlit secrets -> environment, BEFORE importing job_agent (config reads env at import).
-for _name in ("GOOGLE_API_KEY", "GEMINI_MODELS", "DEMO_SESSION_LIMIT", "DEMO_DAILY_LIMIT"):
+for _name in ("GOOGLE_API_KEY", "GEMINI_MODELS", "DEMO_SESSION_LIMIT", "DEMO_DAILY_LIMIT",
+              "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "ADZUNA_COUNTRY",
+              "DISCOVERY_SESSION_LIMIT", "DISCOVERY_DAILY_LIMIT", "AGENT_SESSION_LIMIT", "AGENT_DAILY_LIMIT"):
     try:
         if _name in st.secrets:
             os.environ.setdefault(_name, str(st.secrets[_name]))
@@ -30,9 +32,13 @@ from job_agent.matching import SkillStatus, match_resume_to_jd  # noqa: E402
 from job_agent.resume_index import build_resume_index, load_profile, load_store  # noqa: E402
 from job_agent.resume_loader import ResumeLoadError  # noqa: E402
 from job_agent.session import delete_session, new_session_id  # noqa: E402
+from job_agent.discovery import AdzunaClient, SearchCache  # noqa: E402
 from job_agent.tracker_db import TrackerError, TrackerRepo, get_engine  # noqa: E402
 from job_agent.tracker_logic import ApplicationInput, Status, today_local  # noqa: E402
-from job_agent.ui_tracker import first_error, flash, label, render_tracker  # noqa: E402
+from job_agent.ui_agent import render_agent  # noqa: E402
+from job_agent.ui_discovery import render_discovery  # noqa: E402
+from job_agent.ui_tracker import first_error, label, render_tracker  # noqa: E402
+from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 SAMPLE_JD = """Data Science Intern - Acme Analytics, Bengaluru (Hybrid)
@@ -72,6 +78,41 @@ def get_demo():
 @st.cache_resource
 def get_repo() -> TrackerRepo:
     return TrackerRepo(get_engine())
+
+
+@st.cache_resource
+def get_checkpointer() -> InMemorySaver:
+    """Holds paused assistant runs between button clicks (in memory; cleared when a run ends)."""
+    return InMemorySaver()
+
+
+@st.cache_resource
+def get_agent_limiter() -> UsageLimiter:
+    return UsageLimiter(
+        per_session=int(os.getenv("AGENT_SESSION_LIMIT", "2")),
+        per_day=int(os.getenv("AGENT_DAILY_LIMIT", "15")),
+    )
+
+
+@st.cache_resource
+def get_search_cache() -> SearchCache:
+    return SearchCache()
+
+
+@st.cache_resource
+def get_discovery_limiter() -> UsageLimiter:
+    return UsageLimiter(
+        per_session=int(os.getenv("DISCOVERY_SESSION_LIMIT", "5")),
+        per_day=int(os.getenv("DISCOVERY_DAILY_LIMIT", "30")),
+    )
+
+
+def get_server_adzuna() -> AdzunaClient | None:
+    """The server's Adzuna client, or None when the keys aren't configured."""
+    app_id, app_key = os.getenv("ADZUNA_APP_ID"), os.getenv("ADZUNA_APP_KEY")
+    if not (app_id and app_key):
+        return None
+    return AdzunaClient(app_id, app_key, country=os.getenv("ADZUNA_COUNTRY", "in"), cache=get_search_cache())
 
 
 @st.cache_resource
@@ -151,7 +192,8 @@ due_count = len(repo.due_reminders(visitor, today))
 if due_count:
     st.warning(f"⏰ {due_count} application follow-up(s) due. Open the Tracker tab.")
 
-tab_match, tab_tracker = st.tabs(["🔍 Match a job", "📋 Tracker"])
+tab_match, tab_discover, tab_agent, tab_tracker = st.tabs(
+    ["🔍 Match a job", "🔎 Discover jobs", "🤖 Apply assistant", "📋 Tracker"])
 
 with tab_match:
 
@@ -259,6 +301,14 @@ with tab_match:
 
     st.divider()
     st.caption("Matching is a guide, not a verdict. You stay in control of every application you send.")
+
+with tab_discover:
+    render_discovery(profile, store, repo, visitor, today, get_server_adzuna(), get_discovery_limiter(),
+                     get_search_cache(), os.getenv("ADZUNA_COUNTRY", "in"))
+
+with tab_agent:
+    render_agent(profile, store, repo, visitor, today, get_agent_limiter(), get_checkpointer(), byo, user_key,
+                 friendly_error, "My uploaded resume" if my_sid else "Sample resume")
 
 # Drawn last on purpose: anything saved on the Match tab in this run shows up here immediately.
 with tab_tracker:

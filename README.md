@@ -17,6 +17,8 @@ CLI demos: `python -m scripts.part1_demo`, `part2_demo`, `part3_demo`.
 
 ## Features
 - Match a job description to your resume (RAG evidence, explainable score, ATS keywords, gap advice).
+- Job discovery: search Adzuna (official API) or import a CSV; de-duplicated, fresher-filtered and ranked against your resume.
+- Apply assistant (LangGraph agent): tailors your real bullets and drafts a recruiter email; every rewrite is fact-checked and you approve each step.
 - Application tracker: statuses and history, follow-up reminders (+ calendar export), response-rate stats by resume version.
 
 ## Modes
@@ -33,3 +35,8 @@ CLI demos: `python -m scripts.part1_demo`, `part2_demo`, `part3_demo`.
 
 ## Tracker data
 The demo server's disk is temporary. Use **Export my tracker** to keep a copy, or set `DATABASE_URL` to a hosted Postgres for durable storage.
+
+## Job discovery setup (optional)
+Get free keys at https://developer.adzuna.com and add `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (and `ADZUNA_COUNTRY`, default `in`)
+to `.env` locally or to the Streamlit secrets. Without them the Discover tab still works with CSV import or visitors' own keys.
+Adzuna's free tier is limited, so searches are cached for an hour. Jobs by Adzuna.

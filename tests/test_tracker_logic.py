@@ -122,3 +122,11 @@ def test_export_model_round_trip():
     assert again.applications[0].history[0].to_status == Status.APPLIED
     with pytest.raises(ValidationError):
         t.TrackerExport.model_validate_json('{"version": 2, "exported_on": "2026-10-18", "applications": []}')
+
+
+def test_to_local_converts_utc_to_ist_and_survives_bad_zone():
+    utc = datetime(2026, 10, 18, 6, 51)
+    assert t.to_local(utc, "Asia/Kolkata") == datetime(2026, 10, 18, 12, 21, tzinfo=t.to_local(utc, "Asia/Kolkata").tzinfo)
+    assert t.to_local(utc, "Asia/Kolkata").hour == 12 and t.to_local(utc, "Asia/Kolkata").minute == 21
+    assert t.to_local(utc, "Not/AZone") == utc
+

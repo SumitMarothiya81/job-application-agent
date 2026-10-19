@@ -2,6 +2,7 @@ langchain-core
 langchain-google-genai
 pydantic>=2
 python-dotenv
+httpx
 numpy
 fastembed
 pypdf
@@ -10,3 +11,4 @@ pytest
 streamlit
 sqlalchemy
 tzdata
+langgraph

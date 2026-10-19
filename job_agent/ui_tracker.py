@@ -11,6 +11,7 @@ from job_agent.tracker_logic import (
     ApplicationInput,
     Status,
     follow_up_ics,
+    to_local,
 )
 
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
@@ -152,7 +153,8 @@ def _render_manage(repo: TrackerRepo, user_id: str, today, apps) -> None:
 
     with st.expander("Status history"):
         for change in app.history:
-            line = f"{change.changed_at:%d %b %Y %H:%M}: {label(change.from_status)} → {label(change.to_status)}"
+            before = label(change.from_status) if change.from_status else "New"
+            line = f"{to_local(change.changed_at):%d %b %Y %H:%M}: {before} → {label(change.to_status)}"
             st.write(line + (f" ({change.note})" if change.note else ""))
 
     with st.expander("Delete this application"):
@@ -231,7 +233,8 @@ def render_tracker(repo: TrackerRepo, user_id: str, today) -> None:
         st.dataframe([
             {"Company": a.company, "Role": a.role, "Status": label(a.status),
              "Applied": _fmt_date(a.applied_on), "Next follow-up": _fmt_date(a.next_follow_up),
-             "Match": f"{a.match_score}/100" if a.match_score is not None else "-","Resume": a.resume_version or ""}
+             "Match": f"{a.match_score}/100" if a.match_score is not None else "-",
+             "Resume": a.resume_version or ""}
             for a in shown
         ], hide_index=True)
         _render_manage(repo, user_id, today, apps)

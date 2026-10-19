@@ -56,6 +56,15 @@ def today_local(tz_name: str | None = None) -> date:
         return datetime.now(timezone.utc).date()
 
 
+def to_local(moment: datetime, tz_name: str | None = None) -> datetime:
+    """Convert a stored (naive UTC) timestamp to the user's timezone for display."""
+    name = tz_name or os.getenv("TRACKER_TIMEZONE", "Asia/Kolkata")
+    try:
+        return moment.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(name))
+    except Exception:  # noqa: BLE001
+        return moment
+
+
 def schedule_follow_up(status: Status, anchor: date) -> date | None:
     """Reminder date for a status, counted from `anchor` (None if no reminder applies)."""
     days = FOLLOW_UP_AFTER_DAYS.get(status)

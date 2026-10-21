@@ -145,6 +145,7 @@ mode = st.sidebar.radio(
 )
 byo = mode == "My own Gemini key"
 user_key = None
+uploaded = None
 remaining_slot = None
 
 if byo:
@@ -182,6 +183,10 @@ if my_sid:
 else:
     profile, store = get_demo()
     source_note = "Using the **fictional sample resume** (Riya Verma, final-year B.Tech)."
+
+if byo and uploaded is not None and not my_sid:
+    st.warning("You uploaded a resume but haven't indexed it, so everything below still uses the SAMPLE resume. "
+               "Click 'Index my resume' in the sidebar.")
 
 # --------------------------------------------------------------------- tabs
 visitor = st.session_state["visitor_id"]

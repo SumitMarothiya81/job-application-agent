@@ -33,12 +33,14 @@ from job_agent.matching import _profile_text, _tokens, match_resume_to_jd
 from job_agent.resume_schema import ResumeProfile
 from job_agent.schemas import JobDescription
 from job_agent.vector_store import VectorStore
-from job_agent.verify import build_vocab, check_email, check_rewrite
+from job_agent.verify import build_vocab, check_email, check_rewrite, is_trivial_change, jd_term_gain
 
 MAX_TAILOR_ATTEMPTS = 2     # first try + one retry, to keep the number of Gemini calls down
 MAX_EMAIL_ATTEMPTS = 2
 MAX_SOURCE_BULLETS = 5
 MAX_PER_SOURCE = 2
+MIN_SOURCE_BULLETS = 2     # always tailor at least this many
+RELEVANCE_BAR = 1.5        # below this a bullet isn't worth sending to the writer
 
 
 # --------------------------------------------------------------------------
@@ -67,6 +69,21 @@ class JudgeOutput(BaseModel):
 class EmailDraft(BaseModel):
     subject: str
     body: str
+
+
+def _changed(proposal: dict) -> bool:
+    """Worth showing: not a spelling tweak, and it adds at least one keyword from the job."""
+    return bool(proposal.get("gain")) and proposal["rewritten"] != proposal["original"] \
+        and not is_trivial_change(proposal["original"], proposal["rewritten"])
+
+
+def format_email_body(body: str) -> str:
+    """Gemini sometimes returns the whole email on one line: restore the greeting and sign-off breaks."""
+    if "\n" in body.strip():
+        return body.strip()
+    text = re.sub(r"^((?:Dear|Hi|Hello) [^,]{1,40},)\s+", r"\1\n\n", body.strip())
+    return re.sub(r"\s+((?:Best regards|Kind regards|Warm regards|Regards|Sincerely|Thank you(?: for your time)?|Thanks),?)\s+(\[Your name\])\s*$",
+                  r"\n\n\1\n\2", text)
 
 
 @dataclass
@@ -125,8 +142,17 @@ def _tech_for_chunk(profile: ResumeProfile, chunk_id: str) -> list[str]:
 
 def select_source_bullets(profile: ResumeProfile, store: VectorStore, jd: JobDescription,
                           limit: int = MAX_SOURCE_BULLETS, per_source: int = MAX_PER_SOURCE) -> list[dict]:
-    """The resume bullets most relevant to this job: skills they literally mention, plus semantic closeness."""
+    """The resume bullets most relevant to this job.
+
+    A JD skill counts fully when it is in the bullet's own words; one that only appears in the project's
+    tech line earns a small, capped credit (so a Python project doesn't make every bullet look relevant), plus a little for the
+    job's keywords. Bullets below RELEVANCE_BAR are skipped unless fewer than MIN_SOURCE_BULLETS qualify.
+    """
     weights = {**{s: 1.0 for s in jd.preferred_skills}, **{s: 2.0 for s in jd.required_skills}}
+    title_tokens = _tokens(jd.job_title)
+    for skill in weights:                      # a skill named in the job title is THE skill of the role
+        if (t := _tokens(skill)) and t <= title_tokens:
+            weights[skill] += 2.0
     similarity = {}
     if store.chunks:
         query = embeddings.embed_query(f"{jd.job_title}. Skills: {', '.join(jd.required_skills)}")
@@ -137,12 +163,25 @@ def select_source_bullets(profile: ResumeProfile, store: VectorStore, jd: JobDes
         if chunk.section not in ("experience", "project") or chunk.id.endswith("-tech"):
             continue
         tech = _tech_for_chunk(profile, chunk.id)
-        tokens = _tokens(f"{chunk.source} {chunk.text}")
-        skill_score = sum(w for skill, w in weights.items() if (t := _tokens(skill)) and t <= tokens)
-        scored.append((skill_score + 2.0 * similarity.get(chunk.id, 0.0), chunk, tech))
+        text_tokens = _tokens(chunk.text)
+        all_tokens = text_tokens | _tokens(chunk.source)
+        relevance = tech_credit = 0.0
+        for skill, weight in weights.items():
+            skill_tokens = _tokens(skill)
+            if skill_tokens and skill_tokens <= text_tokens:
+                relevance += weight
+            elif skill_tokens and skill_tokens <= all_tokens:
+                tech_credit += weight / 4          # only in the project's tech line
+        relevance += min(1.0, tech_credit)         # capped: many tech-line skills must not outrank real wording
+        relevance += 0.5 * sum(1 for k in jd.keywords if (t := _tokens(k)) and t <= text_tokens)
+        scored.append((relevance, relevance + 2.0 * similarity.get(chunk.id, 0.0), chunk, tech))
+
+    ranked = sorted(scored, key=lambda item: item[1], reverse=True)
+    qualifying = [item for item in ranked if item[0] >= RELEVANCE_BAR]
+    pool = qualifying if len(qualifying) >= MIN_SOURCE_BULLETS else ranked   # never starve the assistant
 
     chosen, per_origin = [], {}
-    for _, chunk, tech in sorted(scored, key=lambda item: item[0], reverse=True):
+    for _, _, chunk, tech in pool:
         if per_origin.get(chunk.source, 0) >= per_source:
             continue
         per_origin[chunk.source] = per_origin.get(chunk.source, 0) + 1
@@ -177,8 +216,14 @@ def package_markdown(package: dict, today: date | None = None) -> str:
     today = today or date.today()
     lines = [f"# Application kit: {package['job_title']} @ {package.get('company') or 'unknown company'}",
              f"_Prepared {today:%d %b %Y}. Nothing here has been sent or submitted; you stay in control._", "",
-             f"**Match score:** {package['match_score']}/100 ({package['verdict']})", "",
-             "## Tailored bullets", ""]
+             f"**Match score:** {package['match_score']}/100 ({package['verdict']})", ""]
+    if package.get("lead_with"):
+        lines += ["## Lead with these bullets (most relevant to this job first)", ""]
+        for item in package["lead_with"]:
+            matches = f" _(matches: {', '.join(item['matches'])})_" if item["matches"] else ""
+            lines.append(f"- {item['text']}{matches}")
+        lines.append("")
+    lines += ["## Rewrites you accepted", ""]
     if package["bullets"]:
         for item in package["bullets"]:
             lines += [f"- {item['rewritten']}", f"  - _was ({item['source']}):_ {item['original']}"]
@@ -226,7 +271,8 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
         jd = state["jd"]
         payload = {
             "job": {"title": jd["job_title"], "summary": jd["summary"],
-                    "required_skills": jd["required_skills"], "preferred_skills": jd["preferred_skills"]},
+                    "required_skills": jd["required_skills"], "preferred_skills": jd["preferred_skills"],
+                    "job_wording": (jd.get("responsibilities") or [])[:6] + (jd.get("keywords") or [])[:12]},
             "bullets": [{"id": s["id"], "from": s["source"], "original": s["text"],
                          "mirror_skills": s["mirror_skills"],
                          "feedback": proposals.get(s["id"], {}).get("issues") or None} for s in targets],
@@ -236,7 +282,7 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
             item = returned.get(s["id"])
             proposals[s["id"]] = {"id": s["id"], "source": s["source"], "original": s["text"],
                                   "rewritten": item.rewritten.strip() if item else "",
-                                  "status": "pending", "issues": [], "warnings": []}
+                                  "status": "pending", "issues": [], "warnings": [], "gain": []}
         attempt = state.get("attempt", 0) + 1
         return {"proposals": [proposals[s["id"]] for s in state["sources"] if s["id"] in proposals],
                 "attempt": attempt, "log": [f"Drafted rewrites for {len(targets)} bullet(s) (attempt {attempt})."]}
@@ -244,6 +290,7 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
     def verify_node(state: AgentState) -> dict:
         jd = JobDescription(**state["jd"])
         vocab = build_vocab(profile, jd)
+        job_terms = [normalize_skill(t) for t in jd.required_skills + jd.preferred_skills + jd.keywords]
         by_id = {s["id"]: s for s in state["sources"]}
         proposals = [dict(p) for p in state["proposals"]]
 
@@ -255,10 +302,11 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
                 continue
             check = check_rewrite(source["text"], source["tech_stack"], p["rewritten"], vocab)
             p["issues"], p["warnings"] = list(check.issues), list(check.warnings)
+            p["gain"] = jd_term_gain(p["original"], p["rewritten"], job_terms)
 
         # Second layer: an AI fact-checker for claims the word checks can't see (only for rewrites that
         # passed the cheap checks and actually changed something).
-        to_judge = [p for p in pending if not p["issues"] and p["rewritten"] != p["original"]]
+        to_judge = [p for p in pending if not p["issues"] and _changed(p)]
         if deps.judge and to_judge:
             verdicts = {v.id: v for v in deps.judge({"items": [
                 {"id": p["id"], "original": p["original"], "rewrite": p["rewritten"]} for p in to_judge]}).items}
@@ -283,13 +331,16 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
         # NO model calls here: this node re-runs from its first line when you resume.
         proposals = state["proposals"]
         passing = [p for p in proposals if p["status"] == "pass"]
-        if not any(p["rewritten"] != p["original"] for p in passing):
-            return {"accepted": [], "log": ["No rewrite passed the fact-check; your original bullets stay as they are."]}
+        if not any(_changed(p) for p in passing):
+            failed = any(p["status"] == "fail" for p in proposals)
+            reason = ("No rewrite passed the fact-check" if failed and not passing
+                      else "No rewrite added anything the job asks for")
+            return {"accepted": [], "log": [reason + "; your original bullets stay as they are."]}
         reply = interrupt({"type": "review_bullets", "items": [
-            {**p, "changed": p["rewritten"] != p["original"]} for p in proposals]})
+            {**p, "changed": _changed(p)} for p in proposals]})
         wanted = set((reply or {}).get("accept", []))
         accepted = [{"id": p["id"], "source": p["source"], "original": p["original"], "rewritten": p["rewritten"]}
-                    for p in passing if p["id"] in wanted and p["rewritten"] != p["original"]]
+                    for p in passing if p["id"] in wanted and _changed(p)]
         return {"accepted": accepted, "log": [f"You accepted {len(accepted)} rewrite(s)."]}
 
     def email_node(state: AgentState) -> dict:
@@ -297,7 +348,8 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
         accepted = state.get("accepted", [])
         facts_bullets = [a["rewritten"] for a in accepted] or [s["text"] for s in state["sources"][:2]]
         strengths = state["report"]["strengths"]
-        payload = {"job": {"title": jd["job_title"], "company": jd.get("company")},
+        payload = {"job": {"title": jd["job_title"], "company": jd.get("company"),
+                           "responsibilities": (jd.get("responsibilities") or [])[:4]},
                    "facts": {"skills_that_match": strengths, "bullets": facts_bullets}}
         allowed_text = f"{profile_text} {state['jd_text']} {' '.join(facts_bullets)}"
         vocab = build_vocab(profile, JobDescription(**jd))
@@ -307,7 +359,7 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
             draft = deps.email({**payload, "feedback": issues or None})
             issues = check_email(draft.subject, draft.body, allowed_text, known, vocab)
             if not issues:
-                return {"email": {"subject": draft.subject.strip(), "body": draft.body.strip(), "origin": "ai"},
+                return {"email": {"subject": draft.subject.strip(), "body": format_email_body(draft.body), "origin": "ai"},
                         "email_issues": [], "log": ["Drafted a recruiter email and fact-checked it."]}
         return {"email": template_email(jd, strengths, facts_bullets), "email_issues": issues,
                 "log": ["The AI email kept making claims not in your resume, so a safe template was used."]}
@@ -330,11 +382,16 @@ def build_graph(profile: ResumeProfile, store: VectorStore, deps: AgentDeps, che
         warnings = [f"Email: {w}" for w in state.get("email_warnings", [])]
         warnings += [f"{p['source']}: {w}" for p in state.get("proposals", []) for w in p.get("warnings", [])
                      if any(a["id"] == p["id"] for a in state.get("accepted", []))]
+        accepted_text = {a["id"]: a["rewritten"] for a in state.get("accepted", [])}
+        lead_with = [{"id": src["id"], "source": src["source"], "text": accepted_text.get(src["id"], src["text"]),
+                      "matches": src["mirror_skills"]} for src in state["sources"]]  # most relevant first
         package = {
             "job_title": jd["job_title"], "company": jd.get("company"),
             "match_score": report["overall_score"], "verdict": report["verdict"],
+            "lead_with": lead_with,
             "bullets": state.get("accepted", []), "email": state.get("email"), "warnings": warnings,
-            "resume_version": f"Tailored: {jd.get('company') or 'job'} - {jd['job_title']}"[:60],
+            "resume_version": (f"Tailored: {jd['company']} - {jd['job_title']}" if jd.get("company")
+                               else f"Tailored: {jd['job_title']}")[:60],
         }
         package["markdown"] = package_markdown(package)
         return {"package": package, "log": ["Prepared your application kit. Nothing was sent."]}

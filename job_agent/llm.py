@@ -1,6 +1,7 @@
 """One place that creates the LLM client, with model fallback and per-request API keys."""
 
 import logging
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
@@ -45,10 +46,15 @@ def _build_llm(model: str, temperature: float, api_key: str) -> ChatGoogleGenera
     kwargs = {}
     if not model.startswith("gemini-3"):
         kwargs["temperature"] = temperature
+    budget = os.getenv("GEMINI_THINKING_BUDGET")
+    if budget not in (None, ""):
+        kwargs["thinking_budget"] = int(budget)  # opt-in: less 'thinking' = faster answers
     return ChatGoogleGenerativeAI(
         model=model,
         google_api_key=api_key,
-        max_retries=2,  # retry briefly, then let our fallback switch models
+        max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "2")),  # retry briefly, then our fallback switches models
+        # A stalled request must fail over to the next model instead of hanging the whole run.
+        timeout=float(os.getenv("GEMINI_TIMEOUT", "60")),
         **kwargs,
     )
 

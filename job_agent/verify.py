@@ -12,6 +12,7 @@ LLM reviewer in agent.py covers that as a second layer.
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from job_agent.jd_parser import normalize_skill
 from job_agent.matching import RELATED_GROUPS, _tokens, skill_in_known
@@ -107,3 +108,34 @@ def check_email(subject: str, body: str, allowed_text: str, known_skills: list[s
     if claimed:
         issues.append("mentions skills or tools you don't list on your resume: " + ", ".join(claimed))
     return issues
+
+
+def _canonical_text(text: str) -> str:
+    """Lowercase, no punctuation, and British/American -ise/-ize variants made identical."""
+    t = " ".join(re.sub(r"[^a-z0-9% ]+", " ", (text or "").lower()).split())
+    t = re.sub(r"yz(e|ed|es|ing)\b", r"ys\1", t)
+    return re.sub(r"iz(e|ed|es|ing|ation|ations)\b", r"is\1", t)
+
+
+def is_trivial_change(original: str, rewritten: str) -> bool:
+    """True when a 'rewrite' only changes spelling variant, case, punctuation or a typo.
+
+    Such a change isn't tailoring; showing it would be noise, and it can quietly swap British
+    spelling for American, so the original is kept.
+    """
+    a, b = _canonical_text(original), _canonical_text(rewritten)
+    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.985
+
+
+def jd_term_gain(original: str, rewritten: str, terms) -> list[str]:
+    """Job terms (skills/keywords) the rewrite contains that the original did not.
+
+    A rewrite that gains nothing from the job is cosmetic ('Added' -> 'Implemented'), so it isn't shown.
+    """
+    before, after = _tokens(original), _tokens(rewritten)
+    gained = []
+    for term in terms:
+        term_tokens = _tokens(term)
+        if term_tokens and term_tokens <= after and not term_tokens <= before and term not in gained:
+            gained.append(term)
+    return gained

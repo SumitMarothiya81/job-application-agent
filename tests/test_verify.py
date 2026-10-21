@@ -67,3 +67,24 @@ def test_email_checks(vocab):
     assert any("40%" in i for i in issues) and any("docker" in i for i in issues)
     long_body = "word " * 200
     assert any("too long" in i for i in v.check_email("S", long_body, allowed, known, vocab))
+
+
+@pytest.mark.parametrize("original, rewrite, trivial", [
+    ("Designed a dashboard analysing batting performance", "Designed a dashboard analyzing batting performance", True),
+    ("Organised a data cleaning drive", "Organized a data cleaning drive", True),
+    ("Wrote SQL queries to prepare data", "wrote sql queries to prepare data.", True),
+    ("Wrote SQL queries to prepare data", "Wrote SQL queries to prepare data", True),
+    ("Built a regression model on 10,000+ flight records and reduced RMSE by 18%", "Key result: Built a regression model on 10,000+ flight records and reduced RMSE by 18%", False),
+    ("Added prompt templates to keep answers short", "Created prompt templates that keep answers short and structured", False),
+    ("Cleaned 5,000 emails", "Cleaned 6,000 emails", False),
+])
+def test_trivial_changes_are_spelling_case_and_punctuation_only(original, rewrite, trivial):
+    assert v.is_trivial_change(original, rewrite) is trivial
+
+
+def test_jd_term_gain_counts_only_new_job_terms():
+    terms = ["python", "sql", "dashboards", "power bi"]
+    assert v.jd_term_gain("Cleaned 5,000 emails using NLTK", "Cleaned 5,000 emails using NLTK in Python", terms) == ["python"]
+    assert v.jd_term_gain("Built a dashboard", "Built a Power BI dashboard", terms) == ["power bi"]   # 'dashboard' was already there
+    assert v.jd_term_gain("Added prompt templates", "Implemented prompt templates", terms) == []   # a verb swap gains nothing
+    assert v.jd_term_gain("Used SQL daily", "Used SQL every day", terms) == []                    # already there

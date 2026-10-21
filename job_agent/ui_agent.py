@@ -1,5 +1,6 @@
 """Streamlit 'Apply assistant' tab: runs the LangGraph agent and pauses for YOUR decisions."""
 
+import time
 import uuid
 
 import streamlit as st
@@ -34,25 +35,45 @@ def _copy_from_match() -> None:
     st.session_state["agent_jd"] = st.session_state.get("jd_text", "")
 
 
+STEP_LABELS = {
+    "parse": "Read the job description",
+    "match": "Matched it to your resume",
+    "select": "Picked your most relevant bullets",
+    "tailor": "Drafted rewrites",
+    "verify": "Fact-checked the rewrites",
+    "review": "Prepared the rewrites for your review",
+    "email": "Drafted and fact-checked the email",
+    "email_review": "Prepared the email for your review",
+    "finalize": "Put your application kit together",
+}
+
+
 def _advance(graph_input, profile, store, checkpointer, api_key, friendly_error) -> None:
-    """Run the graph until it finishes or asks the user something, then rerun the page."""
+    """Run the graph until it finishes or asks the user something, showing each step as it completes."""
     state = _state()
     graph = agent_module.build_graph(profile, store, agent_module.default_deps(), checkpointer)
     config = {"configurable": {"thread_id": state["run_id"]}}
+    started = time.monotonic()
     try:
-        with st.spinner("Working on it (this can take up to a minute)..."), use_api_key(api_key):
-            result = graph.invoke(graph_input, config)
+        with st.status("Working on it. Each step is a Gemini call and can take 10 to 30 seconds...", expanded=True) as status, \
+                use_api_key(api_key):
+            for update in graph.stream(graph_input, config, stream_mode="updates"):
+                for node in update:
+                    if node in STEP_LABELS:
+                        status.write(f"✓ {STEP_LABELS[node]}  ({time.monotonic() - started:.0f}s)")
+            status.update(label=f"Done in {time.monotonic() - started:.0f}s", state="complete", expanded=False)
     except Exception as exc:  # noqa: BLE001
         _reset(checkpointer)
         st.session_state["agent_error"] = friendly_error(exc)
         st.rerun()
         return
-    state["log"] = result.get("log", state.get("log", []))
+    values = graph.get_state(config).values
+    state["log"] = values.get("log", state.get("log", []))
     question = agent_module.pending_interrupt(graph, config)
     if question:
         state.update(stage=question["type"], payload=question)
     else:
-        state.update(stage="done", package=result["package"])
+        state.update(stage="done", package=values["package"])
         try:
             checkpointer.delete_thread(state["run_id"])
         except Exception:  # noqa: BLE001
@@ -93,27 +114,39 @@ def _render_start(profile, store, limiter, user_id, byo, api_key, checkpointer, 
 def _render_bullet_review(profile, store, checkpointer, api_key, friendly_error) -> None:
     state = _state()
     items = state["payload"]["items"]
+    changed = [i for i in items if i["status"] == "pass" and i["changed"]]
+    kept = [i for i in items if i["status"] == "pass" and not i["changed"]]
+    rejected = [i for i in items if i["status"] == "fail"]
+
     st.markdown("#### Step 1 of 2: review the rewrites")
-    st.caption("Every rewrite below passed two fact-checks (no new numbers, no new tools, and an AI reviewer). "
+    st.caption("Every suggestion below passed two fact-checks (no new numbers, no new tools, and an AI reviewer). "
                "You decide which ones to use. Your original bullets are never changed.")
+    if not changed:
+        st.info("No rewrite was needed: your most relevant bullets already fit this job well. "
+                "That's a good sign, and the next step still gives you a lead-with list and an email.")
     with st.form("agent_bullets_form"):
-        for item in items:
+        for item in changed:
             with st.container(border=True):
                 st.markdown(f"**{item['source']}**")
                 st.markdown(f"Original: {item['original']}")
-                if item["status"] == "pass" and item["changed"]:
-                    st.markdown(f"**Suggested:** {item['rewritten']}")
-                    st.checkbox("Use the suggested version", value=True, key=f"agent_acc_{item['id']}")
-                    for warning in item["warnings"]:
-                        st.caption(f"⚠️ {warning}")
-                elif item["status"] == "pass":
-                    st.caption("The assistant suggests keeping this one as it is.")
-                else:
-                    st.caption("🚫 The rewrite was rejected, so your original stays: " + "; ".join(item["issues"]))
+                st.markdown(f"**Suggested:** {item['rewritten']}")
+                if item.get("gain"):
+                    st.caption("Adds job keywords: " + ", ".join(item["gain"]))
+                st.checkbox("Use the suggested version", value=True, key=f"agent_acc_{item['id']}")
+                for warning in item["warnings"]:
+                    st.caption(f"⚠️ {warning}")
+        for item in rejected:
+            with st.container(border=True):
+                st.markdown(f"**{item['source']}**")
+                st.markdown(f"Original: {item['original']}")
+                st.caption("🚫 The rewrite was rejected, so your original stays: " + "; ".join(item["issues"]))
+        if kept:
+            with st.expander(f"{len(kept)} bullet(s) already fit and stay as they are"):
+                for item in kept:
+                    st.markdown(f"- {item['original']}  \n  _{item['source']}_")
         submitted = st.form_submit_button("Continue", key="agent_bullets_submit")
     if submitted:
-        accept = [i["id"] for i in items if i["status"] == "pass" and i["changed"]
-                  and st.session_state.get(f"agent_acc_{i['id']}", True)]
+        accept = [i["id"] for i in changed if st.session_state.get(f"agent_acc_{i['id']}", True)]
         _advance(Command(resume={"accept": accept}), profile, store, checkpointer, api_key, friendly_error)
 
 
@@ -143,7 +176,13 @@ def _render_done(repo: TrackerRepo, user_id, today, checkpointer, default_label)
     c1.metric("Match score", f"{package['match_score']}/100")
     c2.metric("Rewrites you accepted", len(package["bullets"]))
 
-    st.markdown("#### Tailored bullets")
+    st.markdown("#### Lead with these bullets")
+    st.caption("Most relevant to this job first. Put them at the top of the matching sections of your resume.")
+    for item in package.get("lead_with", []):
+        st.markdown(f"- {item['text']}")
+        st.caption(f"{item['source']}" + (f" · matches: {', '.join(item['matches'])}" if item["matches"] else ""))
+
+    st.markdown("#### Rewrites you accepted")
     if package["bullets"]:
         for item in package["bullets"]:
             st.markdown(f"- {item['rewritten']}")
@@ -154,7 +193,7 @@ def _render_done(repo: TrackerRepo, user_id, today, checkpointer, default_label)
     st.markdown("#### Email draft")
     if package["email"]:
         st.write(f"**Subject:** {package['email']['subject']}")
-        st.code(package["email"]["body"], language=None)
+        st.code(package["email"]["body"], language=None, wrap_lines=True)
     else:
         st.write("No email was kept.")
     for warning in package["warnings"]:
@@ -195,7 +234,8 @@ def render_agent(profile, store, repo: TrackerRepo, user_id: str, today, limiter
     st.subheader("Apply assistant")
     st.caption("Tailors your REAL bullets to a job and drafts a recruiter email. It can reword, but never invent: "
                "every rewrite is fact-checked against your resume, and you approve each step. "
-               "Uses about 4 to 6 Gemini calls per run.")
+               "Uses about 4 to 6 Gemini calls per run (usually 1 to 2 minutes).")
+    st.caption(f"Resume in use: **{default_label}**")
     error = st.session_state.pop("agent_error", None)
     if error:
         st.error(error)

@@ -18,7 +18,7 @@ VISITOR = "c" * 32
 FAKE_JD = JobDescription(
     job_title="Data Science Intern", company="Acme", seniority=Seniority.INTERN,
     required_skills=["python", "sql"], preferred_skills=["tableau", "docker"],
-    responsibilities=[], keywords=["python"], summary="x",
+    responsibilities=[], keywords=["python", "result"], summary="x",
 )
 
 
@@ -306,3 +306,8 @@ def test_assistant_copies_the_job_from_the_match_tab(fake_agent):
     at.text_area(key="jd_text").set_value(ASSISTANT_JD)
     at.button(key="agent_copy").click().run()
     assert at.text_area(key="agent_jd").value == ASSISTANT_JD
+
+
+def test_assistant_says_which_resume_it_uses(fake_agent):
+    at = new_app().run()
+    assert any("Resume in use" in c.value and "Sample resume" in c.value for c in at.caption)

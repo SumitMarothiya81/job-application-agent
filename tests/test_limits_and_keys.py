@@ -43,3 +43,33 @@ def test_use_api_key_overrides_server_key(monkeypatch):
         llm.get_llm("m")
     llm.get_llm("m")
     assert seen == ["server-key", "user-key", "server-key"]  # trimmed, and restored afterwards
+
+
+def test_gemini_calls_have_a_time_limit_that_can_be_changed(monkeypatch):
+    seen = []
+    monkeypatch.setattr(llm, "ChatGoogleGenerativeAI", lambda **kwargs: seen.append(kwargs) or object())
+    monkeypatch.setattr(llm, "require_api_key", lambda: "k")
+    llm._build_llm.cache_clear()
+    llm.get_llm("gemini-3.5-flash")
+    monkeypatch.setenv("GEMINI_TIMEOUT", "25")
+    llm._build_llm.cache_clear()
+    llm.get_llm("gemini-3.7-flash")
+    llm._build_llm.cache_clear()
+    assert [kw["timeout"] for kw in seen] == [60.0, 25.0]
+
+
+def test_speed_knobs_are_opt_in(monkeypatch):
+    seen = []
+    monkeypatch.setattr(llm, "ChatGoogleGenerativeAI", lambda **kwargs: seen.append(kwargs) or object())
+    monkeypatch.setattr(llm, "require_api_key", lambda: "k")
+    for name in ("GEMINI_THINKING_BUDGET", "GEMINI_MAX_RETRIES"):
+        monkeypatch.delenv(name, raising=False)
+    llm._build_llm.cache_clear()
+    llm.get_llm("gemini-3.5-flash")
+    monkeypatch.setenv("GEMINI_THINKING_BUDGET", "0")
+    monkeypatch.setenv("GEMINI_MAX_RETRIES", "1")
+    llm._build_llm.cache_clear()
+    llm.get_llm("gemini-3.7-flash")
+    llm._build_llm.cache_clear()
+    assert "thinking_budget" not in seen[0] and seen[0]["max_retries"] == 2          # defaults unchanged
+    assert seen[1]["thinking_budget"] == 0 and seen[1]["max_retries"] == 1

@@ -12,7 +12,7 @@ from job_agent.schemas import JobDescription, Seniority
 JD = JobDescription(
     job_title="Data Science Intern", company="Acme", seniority=Seniority.INTERN,
     required_skills=["python", "sql", "pandas", "scikit-learn"], preferred_skills=["docker", "tableau"],
-    responsibilities=[], keywords=["python"], summary="Build ML features and dashboards.")
+    responsibilities=[], keywords=["python", "result"], summary="Build ML features and dashboards.")
 JD_TEXT = "Data Science Intern at Acme. Python, SQL, pandas, scikit-learn. 6 month internship."
 
 GOOD_EMAIL = EmailDraft(subject="Application: Data Science Intern",
@@ -260,3 +260,180 @@ def test_template_email_and_markdown_helpers():
     assert "- new" in text and "_was (Project: X):_ old" in text and "**Subject:** S" in text and "- careful" in text
     package.update(bullets=[], email=None)
     assert "No rewrites were accepted" in package_markdown(package) and "No email was kept" in package_markdown(package)
+
+
+# ---- tuning: spelling-only rewrites are noise; the kit leads with the most relevant bullets ----------
+def test_cosmetic_only_rewrites_are_not_shown_as_changes_nor_accepted(resume):
+    def rewrite(bullet, call):                                                # b1 bullets: only a full stop added
+        return bullet["original"] + "." if bullet["id"].endswith("b1") else "Key result: " + bullet["original"]
+
+    fake = Fake(rewrite=rewrite)
+    graph, config = start(resume, fake)
+    items = pending_interrupt(graph, config)["items"]
+    cosmetic = [i for i in items if i["id"].endswith("b1")]
+    real = [i for i in items if not i["id"].endswith("b1")]
+    assert cosmetic and real
+    assert all(i["status"] == "pass" and not i["changed"] for i in cosmetic)
+    assert all(i["changed"] for i in real)
+
+    resume_with(graph, config, {"accept": [i["id"] for i in items]})        # tries to accept everything
+    resume_with(graph, config, {"approved": False})
+    accepted_ids = {b["id"] for b in graph.get_state(config).values["package"]["bullets"]}
+    assert accepted_ids == {i["id"] for i in real}
+
+
+def test_no_real_changes_skips_the_bullet_review_and_the_reviewer_call(resume):
+    fake = Fake(rewrite=lambda bullet, call: bullet["original"])              # model returns everything unchanged
+    graph, config = start(resume, fake)
+    assert pending_interrupt(graph, config)["type"] == "review_email"
+    assert fake.calls["judge"] == 0
+
+
+def test_the_kit_leads_with_the_most_relevant_bullets_using_accepted_rewrites(resume):
+    graph, config = start(resume, Fake())
+    items = pending_interrupt(graph, config)["items"]
+    first = items[0]["id"]
+    resume_with(graph, config, {"accept": [first]})
+    resume_with(graph, config, {"approved": False})
+    package = graph.get_state(config).values["package"]
+
+    lead = package["lead_with"]
+    assert [x["id"] for x in lead] == [i["id"] for i in items]               # same order as the ranking
+    assert lead[0]["text"].startswith("Key result: ")                         # accepted rewrite is used
+    assert not lead[1]["text"].startswith("Key result: ")                     # others keep your original wording
+    assert "## Lead with these bullets" in package["markdown"] and lead[0]["text"] in package["markdown"]
+
+
+def test_tailoring_prompt_carries_the_job_wording(resume):
+    fake = Fake()
+    start(resume, fake)
+    job = fake.tailor_payloads[0]["job"]
+    assert "job_wording" in job
+    assert "spelling" in agent.TAILOR_SYSTEM.lower() and "UNCHANGED" in agent.TAILOR_SYSTEM
+
+
+# ---- relevance bar and email wording ------------------------------------------------------------
+def test_bullets_only_in_a_matching_project_are_not_padding(resume):
+    profile, store = resume
+    jd = JD.model_copy(update={"required_skills": ["sql", "power bi"], "preferred_skills": ["python"], "keywords": ["dashboards"]})
+    ids = [s["id"] for s in select_source_bullets(profile, store, jd)]
+    assert "proj-3-b1" in ids and "proj-3-b2" in ids                 # the Power BI / SQL project qualifies
+    assert "proj-4-b2" not in ids                                     # 'prompt templates': only a Python tech-line match
+
+
+def test_selection_never_returns_fewer_than_the_minimum(resume):
+    profile, store = resume
+    jd = JD.model_copy(update={"required_skills": ["cobol"], "preferred_skills": [], "keywords": []})
+    assert len(select_source_bullets(profile, store, jd)) >= agent.MIN_SOURCE_BULLETS
+
+
+def test_email_prompt_gets_the_roles_responsibilities(resume):
+    jd = JD.model_copy(update={"responsibilities": ["Build dashboards", "Clean data", "Write SQL", "Present findings", "Extra"]})
+    profile, store = resume
+    fake = Fake()
+    deps = fake.deps()
+    deps.parse_jd = lambda text: jd
+    graph = build_graph(profile, store, deps, InMemorySaver())
+    config = {"configurable": {"thread_id": "r"}}
+    graph.invoke({"jd_text": JD_TEXT, "log": []}, config)
+    graph.invoke(Command(resume={"accept": []}), config)
+    assert fake.email_payloads[0]["job"]["responsibilities"] == ["Build dashboards", "Clean data", "Write SQL", "Present findings"]
+
+
+# ---- real-run fixes: cosmetic rewrites, email layout, ranking ---------------------------------------
+def test_verb_swaps_are_cosmetic_and_not_shown_but_a_job_keyword_is(resume):
+    def rewrite(bullet, call):
+        if bullet["id"] == "proj-2-b2":
+            return bullet["original"] + " in Python"                          # adds a job keyword: worth showing
+        return bullet["original"].replace("Built", "Created").replace("Wrote", "Authored").replace("Designed", "Crafted") + " "
+
+    fake = Fake(rewrite=rewrite)
+    jd = JD.model_copy(update={"keywords": ["python"]})
+    deps = fake.deps()
+    deps.parse_jd = lambda text: jd
+    profile, store = resume
+    graph = build_graph(profile, store, deps, InMemorySaver())
+    config = {"configurable": {"thread_id": "c"}}
+    graph.invoke({"jd_text": JD_TEXT, "log": []}, config)
+    items = pending_interrupt(graph, config)["items"]
+    shown = [i["id"] for i in items if i["changed"]]
+    assert shown == ["proj-2-b2"] and items[[i["id"] for i in items].index("proj-2-b2")]["gain"] == ["python"]
+
+
+def test_log_explains_why_no_review_was_needed(resume):
+    jd = JD.model_copy(update={"keywords": ["nothing-matches"]})
+    deps = Fake(rewrite=lambda b, c: b["original"] + " (clearer)").deps()
+    deps.parse_jd = lambda text: jd
+    profile, store = resume
+    graph = build_graph(profile, store, deps, InMemorySaver())
+    config = {"configurable": {"thread_id": "l"}}
+    graph.invoke({"jd_text": JD_TEXT, "log": []}, config)
+    log = graph.get_state(config).values["log"]
+    assert any("added anything the job asks for" in line for line in log)
+    assert not any("passed the fact-check;" in line for line in log)
+
+
+def test_one_line_email_gets_its_paragraphs_back():
+    flat = "Dear [Recruiter name], I am applying for the role. I know SQL. Best regards, [Your name]"
+    assert agent.format_email_body(flat) == ("Dear [Recruiter name],\n\nI am applying for the role. I know SQL."
+                                             "\n\nBest regards,\n[Your name]")
+    already = "Hi,\n\nText\n\nThanks,\n[Your name]"
+    assert agent.format_email_body(already) == already
+
+
+def test_a_projects_tech_line_cannot_outrank_the_bullets_own_words(resume):
+    profile, store = resume
+    jd = JD.model_copy(update={"required_skills": ["sql", "power bi", "python", "pandas"],
+                               "preferred_skills": ["scikit-learn", "streamlit"], "keywords": ["dashboards"]})
+    ids = [s["id"] for s in select_source_bullets(profile, store, jd)]
+    assert ids[0] in {"proj-3-b2", "proj-3-b1"}                            # SQL / Power BI bullets lead
+    assert ids.index("proj-1-b2") > ids.index("proj-3-b1")                  # the Streamlit-deploy bullet doesn't
+
+
+def test_visitor_key_also_reaches_streamed_runs(resume):
+    seen = []
+
+    def rewrite(bullet, call):
+        seen.append(llm._api_key_override.get())
+        return "Key result: " + bullet["original"]
+
+    profile, store = resume
+    graph = build_graph(profile, store, Fake(rewrite=rewrite).deps(), InMemorySaver())
+    logs = []
+    with llm.use_api_key("streamed-key"):
+        for update in graph.stream({"jd_text": JD_TEXT, "log": []}, {"configurable": {"thread_id": "s"}}, stream_mode="updates"):
+            logs += [line for out in update.values() if isinstance(out, dict) for line in out.get("log", [])]
+    assert seen and set(seen) == {"streamed-key"}
+    assert logs[0].startswith("Read the job") and any("Fact-checked" in line for line in logs)   # progress is visible
+
+
+def test_a_skill_in_the_job_title_makes_its_bullet_lead(resume):
+    from job_agent.chunking import embedding_text, profile_to_chunks
+    from job_agent import embeddings
+    from job_agent.resume_schema import Experience, ResumeProfile
+    from job_agent.vector_store import VectorStore
+
+    profile = ResumeProfile(
+        skills=["Python", "PostgreSQL", "GitHub"],
+        experience=[Experience(organization="DRDO", role="AI Research Intern",
+                               bullets=["Built an offline speech-to-text desktop app in Python using faster-whisper"]),
+                    Experience(organization="Startup", role="Intern",
+                               bullets=["Used PostgreSQL and GitHub Actions to deploy a workspace app"])])
+    chunks = profile_to_chunks(profile)
+    store = VectorStore(chunks, embeddings.embed_passages([embedding_text(c) for c in chunks]), embeddings.embedding_id())
+    jd = JD.model_copy(update={"job_title": "Python Developer Intern", "required_skills": ["python"],
+                               "preferred_skills": ["postgresql", "github"], "keywords": []})
+    assert select_source_bullets(profile, store, jd)[0]["id"] == "exp-1-b1"          # the Python bullet leads
+
+
+def test_tracker_label_has_no_placeholder_when_the_company_is_unknown(resume):
+    jd = JD.model_copy(update={"company": None})
+    deps = Fake().deps()
+    deps.parse_jd = lambda text: jd
+    profile, store = resume
+    graph = build_graph(profile, store, deps, InMemorySaver())
+    config = {"configurable": {"thread_id": "n"}}
+    graph.invoke({"jd_text": JD_TEXT, "log": []}, config)
+    graph.invoke(Command(resume={"accept": []}), config)
+    graph.invoke(Command(resume={"approved": False}), config)
+    assert graph.get_state(config).values["package"]["resume_version"] == "Tailored: Data Science Intern"

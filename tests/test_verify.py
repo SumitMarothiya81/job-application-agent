@@ -88,3 +88,21 @@ def test_jd_term_gain_counts_only_new_job_terms():
     assert v.jd_term_gain("Built a dashboard", "Built a Power BI dashboard", terms) == ["power bi"]   # 'dashboard' was already there
     assert v.jd_term_gain("Added prompt templates", "Implemented prompt templates", terms) == []   # a verb swap gains nothing
     assert v.jd_term_gain("Used SQL daily", "Used SQL every day", terms) == []                    # already there
+
+
+@pytest.mark.parametrize("rewrite", [
+    "Led the end-to-end deployment of the model as a Streamlit web app so users can estimate fares",
+    "Owned the SQL data pipeline that prepares match-level data for reporting",
+    "Managed a team that added prompt templates to keep answers short and structured",
+    "Built a production-grade assistant that answers health questions with safety disclaimers",
+])
+def test_added_claim_words_are_blocked(vocab, rewrite):
+    out = v.check_rewrite("Deployed the model as a Streamlit web app so users can estimate fares from route and date",
+                          ["streamlit"], rewrite, vocab)
+    assert any("adds claims" in issue for issue in out.issues)
+
+
+def test_claim_words_already_in_the_original_are_allowed(vocab):
+    source = "Led a team of 4 students to build a Streamlit dashboard"
+    assert v.check_rewrite(source, ["streamlit"], "Led a team of 4 students building a Streamlit dashboard", vocab).ok
+    assert not v.check_rewrite(source, ["streamlit"], "Led a team of 4 students building an enterprise Streamlit dashboard", vocab).ok

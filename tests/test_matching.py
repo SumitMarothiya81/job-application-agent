@@ -169,3 +169,10 @@ def test_gap_advice_keeps_only_requested_skills_and_sets_priority(monkeypatch):
     plan = gap_advice.advise_gaps(report, jd, profile.known_skills())
     assert [i.skill for i in plan.items] == ["kubernetes", "docker"]  # our order, no 'rust'
     assert [i.priority for i in plan.items] == ["high", "medium"]
+
+
+def test_vendor_prefix_does_not_hide_the_same_skill():
+    known = ["google gemini", "microsoft excel", "python"]
+    assert skill_in_known("gemini", known) and skill_in_known("Google Gemini", known)
+    assert skill_in_known("excel", known) and skill_in_known("microsoft excel", ["excel"])
+    assert not skill_in_known("sheets", known) and not skill_in_known("google", ["python"])

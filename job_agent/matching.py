@@ -103,6 +103,14 @@ def _tokens(text: str) -> set[str]:
     return {t[:-1] if len(t) > 3 and t.endswith("s") else t for t in found}
 
 
+_VENDORS = {"google", "microsoft", "amazon", "apache", "meta", "ibm"}
+
+
+def _core(tokens: set[str]) -> set[str]:
+    """Tokens without a vendor prefix: 'google gemini' and 'gemini' are the same skill."""
+    return (tokens - _VENDORS) or tokens
+
+
 def skill_in_known(skill: str, known: list[str]) -> bool:
     """True if `skill` is on the resume's skill list (exact or whole-phrase match).
 
@@ -115,7 +123,7 @@ def skill_in_known(skill: str, known: list[str]) -> bool:
         return False
     for item in known:
         kt = _tokens(item)
-        if st == kt:
+        if st == kt or _core(st) == _core(kt):
             return True
         if len(st) >= 2 and st <= kt:
             return True

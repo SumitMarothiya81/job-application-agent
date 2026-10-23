@@ -33,6 +33,17 @@ SKILL_LEXICON = {
 
 _NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?%?")
 
+# Words that inflate a bullet's scope or seniority. A rewrite may not ADD them; if the original already
+# uses one, it may keep it.
+_CLAIM_WORDS = re.compile(
+    r"\b(led|lead|leading|managed|mentored|owned|ownership|spearheaded|architected|headed|directed|pioneered|"
+    r"orchestrated|oversaw|drove|end-to-end|production(?:-grade|-ready)?|enterprise(?:-scale|-grade)?|scalable|"
+    r"millions?|award(?:-winning)?|industry-leading|state-of-the-art|team)\b", re.IGNORECASE)
+
+
+def claim_words(text: str) -> set[str]:
+    return {m.group().lower() for m in _CLAIM_WORDS.finditer(text or "")}
+
 
 def numbers_in(text: str) -> set[str]:
     """Numbers as comparable strings: '10,000+' -> '10000', '18%' -> '18%'."""
@@ -68,7 +79,7 @@ class RewriteCheck:
 
 
 def check_rewrite(source_text: str, allowed_terms: list[str], rewritten: str, vocab: set[str],
-                  max_chars: int = 220) -> RewriteCheck:
+                  max_chars: int = 220, check_claims: bool = True) -> RewriteCheck:
     result = RewriteCheck()
     text = " ".join((rewritten or "").split())
     if not text:
@@ -88,6 +99,10 @@ def check_rewrite(source_text: str, allowed_terms: list[str], rewritten: str, vo
     allowed_tokens = set(_tokens(source_text))
     for term in allowed_terms:
         allowed_tokens |= _tokens(term)
+    if check_claims:
+        inflated = sorted(claim_words(text) - claim_words(source_text))
+        if inflated:
+            result.issues.append("adds claims that are not in the original: " + ", ".join(inflated))
     foreign = sorted(t for t in _mentioned(text, vocab) if not _tokens(t) <= allowed_tokens)
     if foreign:
         result.issues.append("mentions skills or tools that are not in the original bullet: " + ", ".join(foreign))

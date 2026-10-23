@@ -49,6 +49,7 @@ def test_gemini_calls_have_a_time_limit_that_can_be_changed(monkeypatch):
     seen = []
     monkeypatch.setattr(llm, "ChatGoogleGenerativeAI", lambda **kwargs: seen.append(kwargs) or object())
     monkeypatch.setattr(llm, "require_api_key", lambda: "k")
+    monkeypatch.delenv("GEMINI_TIMEOUT", raising=False)  # must not depend on your .env
     llm._build_llm.cache_clear()
     llm.get_llm("gemini-3.5-flash")
     monkeypatch.setenv("GEMINI_TIMEOUT", "25")
@@ -62,6 +63,7 @@ def test_speed_knobs_are_opt_in(monkeypatch):
     seen = []
     monkeypatch.setattr(llm, "ChatGoogleGenerativeAI", lambda **kwargs: seen.append(kwargs) or object())
     monkeypatch.setattr(llm, "require_api_key", lambda: "k")
+    monkeypatch.delenv("GEMINI_TIMEOUT", raising=False)  # must not depend on your .env
     for name in ("GEMINI_THINKING_BUDGET", "GEMINI_MAX_RETRIES"):
         monkeypatch.delenv(name, raising=False)
     llm._build_llm.cache_clear()

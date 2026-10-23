@@ -53,10 +53,16 @@ Gemini; deploy early (after Part 3) on Streamlit Community Cloud / Render; demo 
   the AI reviewer and writer quality must be judged on real runs. Part 8 adds an evaluation set.
 - Paused runs live in an InMemorySaver (cache_resource): lost on app restart, deleted when a run ends or on 'Start over'.
 
+- Part 7a (done): offline evaluation. job_agent/evaluation.py has 41 hand-labelled matcher cases and 41 rewrite cases (20 faithful,
+  21 dishonest incl. 3 subtle ones the word checks can't catch). `python -m scripts.run_eval` writes docs/EVALUATION.md.
+  Findings that drove fixes: the matcher under-credited 'gemini' vs 'google gemini' (vendor-prefix rule added); word checks alone
+  blocked only 12/21 dishonest rewrites until the claim-word rule (led/owned/production/team...) raised it to 18/21 with 0 false rejects.
+- Roadmap now: 7a evaluation [x], 7b tracing + Docker, 7c final README + demo recording.
+
 ## Current file list
 job_agent/{config,llm,schemas,prompts,jd_parser,session,resume_loader,privacy,resume_schema,
-           chunking,embeddings,vector_store,resume_parser,resume_index,matching,gap_advice,limits,demo,tracker_logic,tracker_db,ui_tracker,discovery,ui_discovery,verify,agent_prompts,agent,ui_agent}.py
+           chunking,embeddings,vector_store,resume_parser,resume_index,matching,gap_advice,limits,demo,tracker_logic,tracker_db,ui_tracker,discovery,ui_discovery,verify,agent_prompts,agent,ui_agent,evaluation}.py
 app.py (Streamlit), data/demo/profile.json, .streamlit/secrets.toml.example
 scripts/{part1_demo,part2_demo,part3_demo,list_models,probe_models}.py
-tests/{test_jd_parser,test_llm_fallback,test_resume_pipeline,test_matching,test_limits_and_keys,test_demo,test_app,test_tracker_logic,test_tracker_db,test_discovery,test_verify,test_agent}.py
+tests/{test_jd_parser,test_llm_fallback,test_resume_pipeline,test_matching,test_limits_and_keys,test_demo,test_app,test_tracker_logic,test_tracker_db,test_discovery,test_verify,test_agent,test_evaluation}.py
 data/sample_resume.txt, data/sample_jds/ds_intern.txt

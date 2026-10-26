@@ -57,7 +57,9 @@ Gemini; deploy early (after Part 3) on Streamlit Community Cloud / Render; demo 
   21 dishonest incl. 3 subtle ones the word checks can't catch). `python -m scripts.run_eval` writes docs/EVALUATION.md.
   Findings that drove fixes: the matcher under-credited 'gemini' vs 'google gemini' (vendor-prefix rule added); word checks alone
   blocked only 12/21 dishonest rewrites until the claim-word rule (led/owned/production/team...) raised it to 18/21 with 0 false rejects.
-- Roadmap now: 7a evaluation [x], 7b tracing + Docker, 7c final README + demo recording.
+- Part 7b-1 (done, image NOT build-tested by me): Dockerfile (python:3.12-slim, model baked in, non-root, healthcheck), .dockerignore
+  (keeps .env/resumes/databases out), docker-compose.yml with a data volume; tests guard the safety-critical parts.
+- Roadmap now: 7a evaluation [x], 7b-1 Docker [x], 7b-2 optional LangSmith tracing, 7c final README + demo recording.
 
 ## Current file list
 job_agent/{config,llm,schemas,prompts,jd_parser,session,resume_loader,privacy,resume_schema,

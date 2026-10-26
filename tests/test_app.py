@@ -311,3 +311,19 @@ def test_assistant_copies_the_job_from_the_match_tab(fake_agent):
 def test_assistant_says_which_resume_it_uses(fake_agent):
     at = new_app().run()
     assert any("Resume in use" in c.value and "Sample resume" in c.value for c in at.caption)
+
+
+def test_single_user_mode_keeps_the_tracker_across_sessions(monkeypatch):
+    monkeypatch.setenv("SINGLE_USER", "true")
+    fixed_id = "0" * 31 + "1"
+    TrackerRepo(get_engine()).add(fixed_id, ApplicationInput(
+        company="MyCo", role="Intern", status=Status.APPLIED, applied_on=today_local() - timedelta(days=30)))
+    for _ in range(2):                                    # two separate browser sessions
+        at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+        assert not at.exception and at.session_state["visitor_id"] == fixed_id
+        assert any("follow-up(s) due" in w.value for w in at.warning)
+
+
+def test_public_mode_gives_each_session_its_own_id():
+    ids = {AppTest.from_file(APP_PATH, default_timeout=30).run().session_state["visitor_id"] for _ in range(2)}
+    assert len(ids) == 2 and all(len(i) == 32 for i in ids)

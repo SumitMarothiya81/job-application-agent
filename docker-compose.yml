@@ -1,0 +1,18 @@
+# Run:  docker compose up --build      then open http://localhost:8501
+# Your keys come from the .env file next to this one (it is NOT baked into the image).
+services:
+  app:
+    build: .
+    image: job-agent
+    ports:
+      - "127.0.0.1:8501:8501"   # only this computer can open it (not your Wi-Fi network)
+    env_file:
+      - .env
+    volumes:
+      - appstate:/app/state        # tracker database + uploaded-resume indexes survive restarts
+    environment:
+      SINGLE_USER: "true"           # one fixed user: the tracker persists across reloads and restarts
+    restart: unless-stopped
+
+volumes:
+  appstate:

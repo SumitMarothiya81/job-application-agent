@@ -134,7 +134,15 @@ def friendly_error(exc: Exception) -> str:
     return f"Something went wrong: {text[:200]}"
 
 
-st.session_state.setdefault("visitor_id", uuid.uuid4().hex)
+def _new_visitor_id() -> str:
+    """Self-hosting (SINGLE_USER=true): one fixed id, so your tracker survives page reloads and restarts.
+    Public demo (default): a random id per browser session, so visitors never see each other's data."""
+    if os.getenv("SINGLE_USER", "").lower() in {"1", "true", "yes"}:
+        return "0" * 31 + "1"
+    return uuid.uuid4().hex
+
+
+st.session_state.setdefault("visitor_id", _new_visitor_id())
 st.session_state.setdefault("result", None)
 
 # ------------------------------------------------------------------ sidebar

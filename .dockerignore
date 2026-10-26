@@ -1,0 +1,20 @@
+# Secrets and personal data must never be copied into an image
+.env
+.env.*
+.streamlit/secrets.toml
+data/resume/
+data/sessions/
+*.db
+
+# Not needed at runtime
+.git
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+docs/
+scripts/
+chroma_db/
+*.zip

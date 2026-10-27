@@ -16,13 +16,16 @@ st.set_page_config(page_title="Job Application Agent", page_icon="🎯", layout=
 # Streamlit secrets -> environment, BEFORE importing job_agent (config reads env at import).
 for _name in ("GOOGLE_API_KEY", "GEMINI_MODELS", "DEMO_SESSION_LIMIT", "DEMO_DAILY_LIMIT",
               "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "ADZUNA_COUNTRY",
-              "DISCOVERY_SESSION_LIMIT", "DISCOVERY_DAILY_LIMIT", "AGENT_SESSION_LIMIT", "AGENT_DAILY_LIMIT"):
+              "DISCOVERY_SESSION_LIMIT", "DISCOVERY_DAILY_LIMIT", "AGENT_SESSION_LIMIT", "AGENT_DAILY_LIMIT",
+              "ENABLE_TRACING", "TRACE_CONTENT", "LANGSMITH_API_KEY", "LANGSMITH_PROJECT"):
     try:
         if _name in st.secrets:
             os.environ.setdefault(_name, str(st.secrets[_name]))
     except Exception:  # no secrets file locally: fall back to .env  # noqa: BLE001
         pass
 
+from job_agent import config  # noqa: E402
+from job_agent.tracing import notice as tracing_notice  # noqa: E402
 from job_agent.demo import build_store, load_demo_profile  # noqa: E402
 from job_agent.gap_advice import advise_gaps  # noqa: E402
 from job_agent.jd_parser import parse_jd  # noqa: E402
@@ -147,6 +150,9 @@ st.session_state.setdefault("result", None)
 
 # ------------------------------------------------------------------ sidebar
 st.sidebar.title("🎯 Job Application Agent")
+_trace_note = tracing_notice(config.TRACING_MODE)
+if _trace_note:
+    st.sidebar.info(_trace_note)
 mode = st.sidebar.radio(
     "Gemini access", ["Demo (sample resume)", "My own Gemini key"], key="mode",
     help="Demo uses a fictional resume and the app's key, with usage limits.",

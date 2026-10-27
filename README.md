@@ -64,3 +64,8 @@ your tracker is still there after a reload or restart. Your keys are read from `
 indexes live in a Docker volume, so they survive restarts. Without Compose:
 `docker build -t job-agent .` then `docker run -p 8501:8501 --env-file .env job-agent`.
 The first build downloads the embedding model into the image (about 1 GB total).
+
+## Tracing (optional, off by default)
+Set `ENABLE_TRACING=true` and `LANGSMITH_API_KEY` to see each assistant run in LangSmith (step timings, model used,
+retries). By default prompts and answers are **hidden**, so no resume or job text leaves your server; set
+`TRACE_CONTENT=true` only for your own debugging. When tracing is on, the sidebar tells visitors what is recorded.

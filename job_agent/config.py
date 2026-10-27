@@ -2,9 +2,14 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from job_agent.tracing import configure_tracing  # noqa: E402
+
+TRACING_MODE = configure_tracing()  # "off" unless you opt in; see job_agent/tracing.py
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
@@ -24,6 +29,8 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "data/sessions"))
 # Upload safety
 MAX_UPLOAD_MB = float(os.getenv("MAX_UPLOAD_MB", "5"))
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+
+
 def require_api_key() -> str:
     """Fail early with a clear message instead of a confusing API error."""
     if not GOOGLE_API_KEY:

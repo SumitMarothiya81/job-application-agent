@@ -8,6 +8,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from job_agent import agent as agent_module
+from job_agent.config import GEMINI_MODELS
 from job_agent.limits import UsageLimiter
 from job_agent.llm import use_api_key
 from job_agent.tracker_db import TrackerError, TrackerRepo
@@ -52,7 +53,8 @@ def _advance(graph_input, profile, store, checkpointer, api_key, friendly_error)
     """Run the graph until it finishes or asks the user something, showing each step as it completes."""
     state = _state()
     graph = agent_module.build_graph(profile, store, agent_module.default_deps(), checkpointer)
-    config = {"configurable": {"thread_id": state["run_id"]}}
+    config = {"configurable": {"thread_id": state["run_id"]}, "run_name": "apply_assistant",
+              "tags": ["apply-assistant"], "metadata": {"models": ",".join(GEMINI_MODELS)}}
     started = time.monotonic()
     try:
         with st.status("Working on it. Each step is a Gemini call and can take 10 to 30 seconds...", expanded=True) as status, \

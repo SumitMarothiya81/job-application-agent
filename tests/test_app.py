@@ -332,8 +332,9 @@ def test_public_mode_gives_each_session_its_own_id():
 def test_sidebar_tells_visitors_when_traces_are_recorded(monkeypatch):
     from job_agent import config
 
+    monkeypatch.setattr(config, "TRACING_MODE", "off")   # must not depend on your .env
     at = new_app().run()
-    assert not any("run traces" in i.value for i in at.sidebar.info)             # off by default: no notice
+    assert not any("run traces" in i.value for i in at.sidebar.info)
     monkeypatch.setattr(config, "TRACING_MODE", "metadata")
     at = new_app().run()
     assert not at.exception and any("NOT included" in i.value for i in at.sidebar.info)

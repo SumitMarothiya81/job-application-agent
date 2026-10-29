@@ -68,3 +68,11 @@ app.py (Streamlit), data/demo/profile.json, .streamlit/secrets.toml.example
 scripts/{part1_demo,part2_demo,part3_demo,list_models,probe_models}.py
 tests/{test_jd_parser,test_llm_fallback,test_resume_pipeline,test_matching,test_limits_and_keys,test_demo,test_app,test_tracker_logic,test_tracker_db,test_discovery,test_verify,test_agent,test_evaluation}.py
 data/sample_resume.txt, data/sample_jds/ds_intern.txt
+
+## Part 7c-1 (done): reproducible installs
+- requirements.txt: direct dependencies, each bounded to its current major (patch/minor updates allowed).
+- requirements-dev.txt: adds pytest. requirements.lock: exact versions the Docker image builds from (verified with a pip
+  dry-run on Python 3.12/Linux; refresh deliberately). Dockerfile installs from the lock.
+- tests/test_requirements.py guards: lock fully pinned, every direct dependency bounded and present in the lock, installed
+  versions inside the declared ranges, Dockerfile uses the lock.
+- Remaining: 7c-2 README (architecture diagram, limits, evaluation numbers, screenshots), 7c-3 demo script + resume bullets.

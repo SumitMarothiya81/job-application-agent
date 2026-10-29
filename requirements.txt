@@ -1,14 +1,16 @@
-langchain-core
-langchain-google-genai
-pydantic>=2
-python-dotenv
-httpx
-numpy
-fastembed
-pypdf
-python-docx
-pytest
-streamlit
-sqlalchemy
-tzdata
-langgraph
+# What the app needs. Each package is limited to its current major version, so a future major release
+# cannot silently break the app, while patch and minor updates are still allowed.
+# Exact, tested versions for the Docker image are in requirements.lock.
+langchain-core>=1,<2
+langchain-google-genai>=4.4,<5
+langgraph>=1.2,<2
+pydantic>=2.5,<3
+python-dotenv>=1,<2
+httpx>=0.28,<1
+numpy>=2,<3
+fastembed>=0.9,<1
+pypdf>=6,<7
+python-docx>=1,<2
+streamlit>=1.50,<2
+sqlalchemy>=2,<3
+tzdata>=2024

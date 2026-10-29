@@ -11,9 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first, so rebuilding after a code change is fast.
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Exact, tested versions (see requirements.lock). Dependencies first, so rebuilding after a code change is fast.
+COPY requirements.lock .
+RUN pip install -r requirements.lock
 
 # Only what the app needs (never the .env file, your resumes or local databases).
 COPY app.py ./

@@ -8,7 +8,7 @@ You stay in control of every submission.
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate    Mac/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env          # add your GOOGLE_API_KEY
 python -m pytest -q
 streamlit run app.py          # opens http://localhost:8501
@@ -69,3 +69,8 @@ The first build downloads the embedding model into the image (about 1 GB total).
 Set `ENABLE_TRACING=true` and `LANGSMITH_API_KEY` to see each assistant run in LangSmith (step timings, model used,
 retries). By default prompts and answers are **hidden**, so no resume or job text leaves your server; set
 `TRACE_CONTENT=true` only for your own debugging. When tracing is on, the sidebar tells visitors what is recorded.
+
+## Dependencies
+`requirements.txt` lists what the app needs, each limited to its current major version. `requirements-dev.txt` adds the
+test tools. `requirements.lock` holds the exact versions the Docker image is built from, so a rebuild later gives the same
+app; refresh it deliberately (rebuild, run the tests, copy the new versions) rather than by accident.

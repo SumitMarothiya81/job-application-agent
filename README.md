@@ -1,76 +1,154 @@
 # Job Application Agent
 
-An agentic assistant that parses job descriptions, matches them to your resume,
-tailors it honestly, drafts recruiter emails, and tracks applications.
-You stay in control of every submission.
+An AI assistant for fresher job hunting that stays honest. It scores how well a job fits your resume, finds jobs, tailors your **real** resume bullets without inventing anything, drafts a recruiter email, and tracks every application with follow-up reminders. **You approve every step. Nothing is ever sent or submitted for you.**
 
-## Run locally
+**Live demo:** https://job-application-agent-j86sj27j8u7vsfp85y3fsm.streamlit.app (free hosting: the first load after idle takes a minute)
+**Code:** https://github.com/SumitMarothiya81/job-application-agent
+
+<!-- After adding screenshots to docs/screenshots/, remove this comment markers to show them:
+![Match a job](docs/screenshots/match.png)
+![Apply assistant](docs/screenshots/assistant.png)
+![Tracker](docs/screenshots/tracker.png)
+-->
+
+## What it does
+
+| Tab                 | What you get                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Match a job**     | Paste a job description. Gemini extracts the required and preferred skills; the matcher scores them against your resume (0-100) and labels each skill **explicit**, **related** (a transferable skill, such as Power BI for Tableau) or **missing**. It shows the resume bullet that is the evidence, missing ATS keywords, and optional advice for closing skill gaps. |
+| **Discover jobs**   | Search fresher jobs through Adzuna's official API, or import a CSV of jobs you collected. Duplicates are merged, jobs asking for experience are hidden, and the rest are ranked by a quick fit estimate.                                                                                                                                                                |
+| **Apply assistant** | A LangGraph agent picks your most relevant bullets, proposes rewrites, fact-checks them, and pauses so **you** choose which to keep. It then drafts a recruiter email and pauses again for your edits.                                                                                                                                                                  |
+| **Tracker**         | Application statuses with history, follow-up reminders (in-app and `.ics` calendar files), a response-rate chart per resume version, JSON export/import.                                                                                                                                                                                                                |
+
+## How it stays honest
+
+- **Two-layer fact-check on every rewrite.** First, rules: a rewrite may not add a number, a tool or technology that is not in the original bullet, or inflating words such as "led", "owned", "production-grade". Second, a separate Gemini call acts as fact-checker. A rewrite that fails is retried once and then dropped; your original bullet stays.
+- **A rewrite must earn its place.** It is shown only if it adds a keyword the job actually uses, so cosmetic edits ("Added" to "Implemented") never reach you.
+- **Humans decide.** The agent pauses twice (LangGraph `interrupt`): once for the rewrites, once for the email. The result is text you copy.
+- **If the email cannot be made honest,** the app falls back to a plain template instead of sending a risky one.
+- **Privacy.** Your email, phone, profile links and name line are masked **before** any text goes to Gemini. Your Gemini key lives in your browser session only. "Delete my data" removes your indexed resume. Tracing is off by default.
+- **No scraping.** Jobs come from Adzuna's official API or your own CSV, never from LinkedIn, Naukri or Indeed pages.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    R["Resume PDF / DOCX / TXT"] --> X["Mask contact details"]
+    X --> Q["Gemini: parse into bullets"]
+    Q --> E["Local embeddings (bge-small)"]
+    E --> S["Skill matcher: rules + similarity"]
+    UI["Streamlit app"] --> M["Match a job"]
+    UI --> D["Discover jobs"]
+    UI --> A["Apply assistant"]
+    UI --> T["Tracker"]
+    M --> J["Gemini: parse job into skills"]
+    M --> S
+    D --> AD["Adzuna API or CSV"]
+    A --> G["LangGraph agent"]
+    T --> DB[("SQLite via SQLAlchemy")]
+```
+
+The assistant is a LangGraph graph with a retry loop and two human checkpoints:
+
+```mermaid
+flowchart TD
+    A["Read the job"] --> B["Match to your resume"]
+    B --> C["Pick the most relevant bullets"]
+    C --> D["Tailor bullets"]
+    D --> E{"Fact-check: numbers, tools, claims, AI reviewer"}
+    E -- "failed: retry once" --> D
+    E -- "done" --> F[/"You choose which rewrites to keep"/]
+    F --> G["Draft recruiter email"]
+    G --> H{"Email fact-check"}
+    H -- "failed: retry once, then safe template" --> G
+    H -- "ok" --> I[/"You edit and approve the email"/]
+    I --> J["Application kit: nothing is sent"]
+```
+
+## Evaluation
+
+Offline, no API calls: `python -m scripts.run_eval` (full report in [docs/EVALUATION.md](docs/EVALUATION.md)).
+
+| What                                                    | Result                                                                                                                        |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Skill matcher on 41 hand-labelled skills                | **41/41 correct, 0 skills wrongly credited**                                                                                  |
+| Rewrite fact-check (rules only) on 41 labelled rewrites | blocks **18/21** dishonest rewrites; wrongly blocks **0/20** faithful ones                                                    |
+| What the rules miss                                     | 3 subtle claims ("outperformed all baselines", "clinically validated", a changed meaning). These are left to the AI reviewer. |
+
+Read these as a regression guard, not a benchmark: the sets are small and hand-written, and the related-skill cases come from the same skill groups the matcher uses. The AI reviewer layer is **not** measured offline.
+
+## Run it
+
+**Live:** open the demo link. Demo mode uses a fictional sample resume and has usage limits; choose **My own Gemini key** to upload your resume.
+
+**Locally**
+
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate    Mac/Linux: source .venv/bin/activate
+git clone https://github.com/SumitMarothiya81/job-application-agent.git
+cd job-application-agent
+python -m venv .venv            # Windows: .venv\Scripts\activate    Mac/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env          # add your GOOGLE_API_KEY
-python -m pytest -q
-streamlit run app.py          # opens http://localhost:8501
+cp .env.example .env            # then add your GOOGLE_API_KEY (free from Google AI Studio)
+python -m pytest -q             # 222 tests, no API key needed
+streamlit run app.py
 ```
-CLI demos: `python -m scripts.part1_demo`, `part2_demo`, `part3_demo`.
 
-## Features
-- Match a job description to your resume (RAG evidence, explainable score, ATS keywords, gap advice).
-- Job discovery: search Adzuna (official API) or import a CSV; de-duplicated, fresher-filtered and ranked against your resume.
-- Apply assistant (LangGraph agent): tailors your real bullets and drafts a recruiter email; every rewrite is fact-checked and you approve each step.
-- Application tracker: statuses and history, follow-up reminders (+ calendar export), response-rate stats by resume version.
+**Docker (self-hosting, one user)**
 
-## Modes
-- **Demo:** fictional sample resume, the app's Gemini key, per-session and daily caps.
-- **My own Gemini key:** paste your key (kept in the browser session only), upload your resume.
-  Contact details are masked before anything is sent to Gemini. "Delete my data" removes it.
-
-## Deploy on Streamlit Community Cloud
-1. Push this repo to GitHub (`.env`, `data/resume/`, `data/sessions/` and `.streamlit/secrets.toml` are git-ignored).
-2. share.streamlit.io -> New app -> pick the repo, branch `main`, main file `app.py`.
-3. Advanced settings -> Python 3.12 (or 3.13) and paste your secrets (see `.streamlit/secrets.toml.example`).
-4. Deploy. The first start downloads the embedding model (~67 MB) and takes a minute.
-5. Free apps sleep after 12 hours without traffic: open your link before sharing it.
-
-## Tracker data
-The demo server's disk is temporary. Use **Export my tracker** to keep a copy, or set `DATABASE_URL` to a hosted Postgres for durable storage.
-
-## Job discovery setup (optional)
-Get free keys at https://developer.adzuna.com and add `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (and `ADZUNA_COUNTRY`, default `in`)
-to `.env` locally or to the Streamlit secrets. Without them the Discover tab still works with CSV import or visitors' own keys.
-Adzuna's free tier is limited, so searches are cached for an hour. Jobs by Adzuna.
-
-## Run with Docker
 ```bash
-cp .env.example .env          # add your GOOGLE_API_KEY (no quotes around values: Docker keeps quotes literally)
-docker compose up --build     # first build takes a few minutes; the embedding model is baked into the image
+docker compose up --build       # then open http://localhost:8501
 ```
-Open http://localhost:8501. The tracker database and indexed resumes live in the `jobagent_data` volume, so they
-survive restarts; `docker compose down -v` deletes them. Your `.env`, real resumes and databases are excluded from
-the image by `.dockerignore`. Without compose:
-```bash
-docker build -t job-application-agent .
-docker run --rm -p 8501:8501 --env-file .env -v jobagent_data:/var/lib/jobagent job-application-agent
+
+The container is reachable only from your own computer, reads keys from `.env` at run time (never baked into the image), and keeps your tracker in a Docker volume. Exact package versions are in `requirements.lock`.
+
+## Configuration (environment variables)
+
+| Variable                                               | Default                       | Purpose                                                                                 |
+| ------------------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------- |
+| `GOOGLE_API_KEY`                                       | none                          | Gemini key for demo mode                                                                |
+| `GEMINI_MODELS`                                        | `gemini-3.5-flash`            | Comma-separated models, tried in order when one is busy                                 |
+| `GEMINI_TIMEOUT`, `GEMINI_MAX_RETRIES`                 | `60`, `2`                     | Seconds before a stalled call fails over, and retries per model                         |
+| `DEMO_SESSION_LIMIT`, `DEMO_DAILY_LIMIT`               | `5`, `100`                    | Match runs per visitor session and per day in demo mode                                 |
+| `AGENT_SESSION_LIMIT`, `AGENT_DAILY_LIMIT`             | `2`, `15`                     | Assistant runs per session and per day                                                  |
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `ADZUNA_COUNTRY`    | none, none, `in`              | Job search (free keys from developer.adzuna.com)                                        |
+| `DISCOVERY_SESSION_LIMIT`, `DISCOVERY_DAILY_LIMIT`     | `5`, `30`                     | Demo search limits                                                                      |
+| `RELATED_THRESHOLD`                                    | `0.75`                        | Similarity needed to call an unlisted skill "related"                                   |
+| `DATABASE_URL`, `DATA_DIR`                             | local SQLite, `data/sessions` | Tracker database (a Postgres URL works) and indexed resumes                             |
+| `SINGLE_USER`                                          | off                           | `true` gives one fixed user so the tracker survives reloads (used by Docker)            |
+| `TRACKER_TIMEZONE`                                     | `Asia/Kolkata`                | Timezone for dates and reminders                                                        |
+| `ENABLE_TRACING`, `LANGSMITH_API_KEY`, `TRACE_CONTENT` | off                           | Optional LangSmith tracing; prompts and answers stay hidden unless `TRACE_CONTENT=true` |
+
+## Project layout
+
 ```
-Run the offline evaluation inside the container: `docker run --rm --env-file .env job-application-agent python -m scripts.run_eval --no-write`.
-
-## Run with Docker
-```bash
-docker compose up --build          # then open http://localhost:8501
+app.py                  Streamlit app (four tabs)
+job_agent/
+  jd_parser.py          job text -> skills (Gemini + Pydantic)
+  resume_*.py, privacy.py, chunking.py, embeddings.py, vector_store.py   resume pipeline
+  matching.py           skill matcher and 0-100 score
+  verify.py             rule-based honesty checks
+  agent.py              LangGraph apply assistant
+  discovery.py          Adzuna client, CSV import, dedupe, fresher filter, ranking
+  tracker_*.py          tracker rules and SQLAlchemy storage
+  evaluation.py         labelled cases and metrics
+  llm.py, tracing.py    Gemini client with model fallback; optional tracing
+tests/                  222 tests (Gemini is replaced by scripted answers)
 ```
-The app is reachable only from your own computer (`127.0.0.1`) and runs in single-user mode (`SINGLE_USER=true`), so
-your tracker is still there after a reload or restart. Your keys are read from `.env` at run time (never copied into the image). The tracker database and uploaded-resume
-indexes live in a Docker volume, so they survive restarts. Without Compose:
-`docker build -t job-agent .` then `docker run -p 8501:8501 --env-file .env job-agent`.
-The first build downloads the embedding model into the image (about 1 GB total).
 
-## Tracing (optional, off by default)
-Set `ENABLE_TRACING=true` and `LANGSMITH_API_KEY` to see each assistant run in LangSmith (step timings, model used,
-retries). By default prompts and answers are **hidden**, so no resume or job text leaves your server; set
-`TRACE_CONTENT=true` only for your own debugging. When tracing is on, the sidebar tells visitors what is recorded.
+## Design decisions
 
-## Dependencies
-`requirements.txt` lists what the app needs, each limited to its current major version. `requirements-dev.txt` adds the
-test tools. `requirements.lock` holds the exact versions the Docker image is built from, so a rebuild later gives the same
-app; refresh it deliberately (rebuild, run the tests, copy the new versions) rather than by accident.
+- **Local embeddings (fastembed, bge-small).** Free, no rate limits, and your resume never leaves the machine for retrieval.
+- **A small numpy store instead of a vector database.** One resume is about 50 chunks; exact search is instant and avoids install problems on free hosts. All access goes through one file, so Chroma or FAISS can replace it.
+- **Rules before the AI reviewer.** They are free, instant and consistent, and they catch the most damaging dishonesty (invented numbers and tools). The AI reviewer covers claims in plain words.
+- **Model fallback.** Gemini 503s are common on free keys, so each call tries the next configured model.
+- **No LLM calls inside the human-approval steps.** LangGraph re-runs an interrupted node from the top on resume, so those nodes contain no model calls.
+
+## Known limitations
+
+- Tests use scripted Gemini answers. Real-model behavior was checked by hand, not by an automated suite.
+- Adzuna returns only a short snippet of each job, so "quick fit" in Discover is an estimate; paste the full description in Match tab for the real score.
+- Scanned (image-only) PDFs are not supported; there is no OCR.
+- On the free public demo the server disk is temporary and each browser session is a separate user, so use **Export** to keep your tracker. For durable storage use Docker or set `DATABASE_URL` to a hosted Postgres.
+- Reminders are in-app and calendar files; there is no email or push notification.
+- Defaults are India-oriented (timezone, Adzuna country) and English only.
+- The Gemini free tier may use prompts to improve Google's models; a paid key does not.

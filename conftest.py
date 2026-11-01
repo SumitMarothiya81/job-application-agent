@@ -3,3 +3,4 @@
 import os
 
 os.environ["EMBEDDING_BACKEND"] = "fake"
+os.environ["ENABLE_TRACING"] = "false"  # tests never send traces, whatever your .env says

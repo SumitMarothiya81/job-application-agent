@@ -1,4 +1,4 @@
-# Job Application Agent
+﻿# Job Application Agent
 
 An AI assistant for fresher job hunting that stays honest. It scores how well a job fits your resume, finds jobs, tailors your **real** resume bullets without inventing anything, drafts a recruiter email, and tracks every application with follow-up reminders. **You approve every step. Nothing is ever sent or submitted for you.**
 
@@ -89,7 +89,7 @@ cd job-application-agent
 python -m venv .venv            # Windows: .venv\Scripts\activate    Mac/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env            # then add your GOOGLE_API_KEY (free from Google AI Studio)
-python -m pytest -q             # 222 tests, no API key needed
+python -m pytest -q             # 226 tests, no API key needed
 streamlit run app.py
 ```
 
@@ -132,7 +132,7 @@ job_agent/
   tracker_*.py          tracker rules and SQLAlchemy storage
   evaluation.py         labelled cases and metrics
   llm.py, tracing.py    Gemini client with model fallback; optional tracing
-tests/                  222 tests (Gemini is replaced by scripted answers)
+tests/                  226 tests (Gemini is replaced by scripted answers)
 ```
 
 ## Design decisions
